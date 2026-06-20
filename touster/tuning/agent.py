@@ -78,12 +78,16 @@ def propose_heuristic(
     if last_bpb != float("inf") and last_bpb > best_bpb * 1.10:
         return {"learning_rate": recipe.learning_rate / 2}
 
+    def _alt(grid, current):
+        opts = [x for x in grid if x != current]
+        return opts if opts else grid
+
     strategies = [
-        lambda: {"learning_rate": rng.choice([x for x in _LR_GRID if x != recipe.learning_rate])},
-        lambda: {"lora_rank": rng.choice([x for x in _RANK_GRID if x != recipe.lora_rank])},
+        lambda: {"learning_rate": rng.choice(_alt(_LR_GRID, recipe.learning_rate))},
+        lambda: {"lora_rank": rng.choice(_alt(_RANK_GRID, recipe.lora_rank))},
         lambda: {"lora_alpha": recipe.lora_rank},  # alpha = rank is a common heuristic
-        lambda: {"warmup_steps": rng.choice([x for x in _WARMUP_GRID if x != recipe.warmup_steps])},
-        lambda: {"scheduler": rng.choice([x for x in _SCHEDULER_GRID if x != recipe.scheduler])},
+        lambda: {"warmup_steps": rng.choice(_alt(_WARMUP_GRID, recipe.warmup_steps))},
+        lambda: {"scheduler": rng.choice(_alt(_SCHEDULER_GRID, recipe.scheduler))},
     ]
     return rng.choice(strategies)()
 
@@ -97,14 +101,23 @@ def _recipe_to_dict(recipe: RecipeConfig) -> dict:
 
 
 def _parse_diff(reply: str) -> dict | None:
-    """Extract JSON object from LLM reply."""
-    match = re.search(r"\{[^}]+\}", reply, re.DOTALL)
-    if not match:
+    """Extract the first JSON object from LLM reply (handles nested brackets like lists)."""
+    # Scan for balanced braces so {"target_modules": ["q_proj"]} parses correctly
+    start = reply.find("{")
+    if start == -1:
         return None
-    try:
-        return json.loads(match.group())
-    except json.JSONDecodeError:
-        return None
+    depth = 0
+    for i, ch in enumerate(reply[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(reply[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
 
 
 def _validate_diff(diff: dict) -> None:

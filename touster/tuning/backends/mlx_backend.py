@@ -77,15 +77,10 @@ class MLXBackend:
         n_eval = max(1, int(len(samples) * eval_fraction))
         eval_samples = samples[-n_eval:]
 
-        total_loss = 0.0
-        for s in eval_samples[:5]:
-            msgs = s.get("messages", [])
-            text = " ".join(m.get("content", "") for m in msgs)
-            # Approximate: use log_prob from generate (not exposed, use length proxy)
-            _ = generate(self._model, self._tokenizer, prompt=text[:200], max_tokens=1, verbose=False)
-            total_loss += 1.0  # placeholder
-
-        return total_loss / max(len(eval_samples[:5]), 1)
+        raise NotImplementedError(
+            "MLXBackend.eval_loss: mlx_lm does not expose per-token log-probs in this version. "
+            "Use bpb from validation loss logged during training instead."
+        )
 
     def save_adapter(self, output_dir: Path) -> None:
         import shutil

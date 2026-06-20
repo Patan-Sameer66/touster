@@ -126,6 +126,7 @@ def run_loop(
                 loop_cfg=loop_cfg,
                 run_dir=run_dir,
                 current_best_bpb=best_bpb,
+                recipe_diff=diff,
             )
 
             last_bpb = bpb
@@ -172,10 +173,11 @@ def run_loop(
 
 
 def _run_judge_top_k(experiments, recipe, backend, dataset_path, client, loop_cfg, run_dir):
-    """Run LLM-as-judge on top-k trials by bpb."""
+    """Run LLM-as-judge on top-k trials, loading each trial's saved adapter."""
     from touster.tuning.eval import eval_llm_judge
     from touster.hardware.detect import detect_hardware
     from touster.tuning.backends.factory import get_backend
+    from touster.tuning.checkpoint import checkpoint_path
 
     kept = sorted([e for e in experiments if e.kept], key=lambda e: e.eval_bpb)
     top_k = kept[: loop_cfg.judge_top_k]
@@ -184,11 +186,27 @@ def _run_judge_top_k(experiments, recipe, backend, dataset_path, client, loop_cf
 
     console.print(f"\n[touster.dim]Running LLM-judge on top-{len(top_k)} trials…[/touster.dim]")
     hw = detect_hardware()
-    be = get_backend(hw)
-    be.load_model(recipe.base_model, recipe.lora_rank, recipe.lora_alpha, recipe.target_modules)
 
     for exp in top_k:
-        score = eval_llm_judge(be, client, dataset_path, n_prompts=loop_cfg.judge_prompts)
-        console.print(f"  Trial {exp.trial_id}: judge={score:.1f}/10")
+        trial_adapter = checkpoint_path(run_dir, exp.trial_id)
+        be = get_backend(hw)
+        be.load_model(
+            recipe.base_model,
+            recipe.lora_rank,
+            recipe.lora_alpha,
+            list(recipe.target_modules),
+        )
+        # Load the per-trial saved adapter if it exists
+        if trial_adapter.exists():
+            try:
+                from peft import PeftModel
+                from transformers import AutoModelForCausalLM
+                base = AutoModelForCausalLM.from_pretrained(recipe.base_model)
+                peft_m = PeftModel.from_pretrained(base, str(trial_adapter))
+                be._model = peft_m
+            except Exception as e:
+                console.print(f"  [touster.warning]Could not load adapter for trial {exp.trial_id}: {e}[/touster.warning]")
 
-    be.unload()
+        score = eval_llm_judge(be, client, dataset_path, n_prompts=loop_cfg.judge_prompts)
+        console.print(f"  Trial {exp.trial_id}: bpb={exp.eval_bpb:.4f} judge={score:.1f}/10")
+        be.unload()

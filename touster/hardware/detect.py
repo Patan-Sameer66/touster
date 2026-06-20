@@ -39,11 +39,12 @@ BANDWIDTH_TABLE: dict[str, float] = {
 
 
 def _lookup_bandwidth(gpu_name: str) -> float:
-    """Return bandwidth (GB/s) for *gpu_name* using longest-match in the table."""
-    for key, bw in BANDWIDTH_TABLE.items():
-        if key.lower() in gpu_name.lower():
-            return bw
-    return 0.0
+    """Return bandwidth (GB/s) for *gpu_name* using longest-key-match in the table."""
+    name_lower = gpu_name.lower()
+    matches = [(key, bw) for key, bw in BANDWIDTH_TABLE.items() if key.lower() in name_lower]
+    if not matches:
+        return 0.0
+    return max(matches, key=lambda x: len(x[0]))[1]
 
 
 def _try_cuda() -> HardwareConfig | None:

@@ -12,13 +12,13 @@ class OpenAIClient:
         base_url: str = "https://api.openai.com/v1",
         model: str = "gpt-4o-mini",
     ) -> None:
-        self.api_key = api_key
+        self._api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
 
     def _headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 

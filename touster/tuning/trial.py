@@ -19,6 +19,7 @@ def run_trial(
     loop_cfg: LoopConfig,
     run_dir: Path,
     current_best_bpb: float,
+    recipe_diff: dict | None = None,
 ) -> tuple[float, Path | None]:
     """
     Run one short trial with fixed budget.
@@ -69,7 +70,7 @@ def run_trial(
 
     record = ExperimentRecord(
         trial_id=trial_id,
-        recipe_diff={},
+        recipe_diff=recipe_diff or {},
         eval_bpb=bpb,
         judge_score=None,
         kept=kept,
