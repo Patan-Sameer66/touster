@@ -1,0 +1,81 @@
+# ═══════════════════════════ PYTHON ═══════════════════════════════════
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+wheels/
+*.whl
+MANIFEST
+
+# ═══════════════════════════ VIRTUAL ENV ══════════════════════════════
+.venv/
+venv/
+env/
+.env/
+ENV/
+
+# ═══════════════════════════ ENV / SECRETS ════════════════════════════
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+secrets.yaml
+
+# ═══════════════════════════ TOUSTER RUNS ═════════════════════════════
+runs/
+touster_run/
+touster_out/
+*.jsonl
+!tests/fixtures/**/*.jsonl
+
+# ═══════════════════════════ MODEL ARTIFACTS ══════════════════════════
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+*.gguf
+*.gguf.stub
+merged_weights/
+final_adapter/
+adapters/
+checkpoints/
+
+# ═══════════════════════════ JUPYTER ══════════════════════════════════
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ═══════════════════════════ TESTING / COVERAGE ═══════════════════════
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+*.log
+
+# ═══════════════════════════ TYPE CHECKERS ════════════════════════════
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# ═══════════════════════════ EDITORS / OS ═════════════════════════════
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ═══════════════════════════ UV / PIP ═════════════════════════════════
+uv.lock
+pip-log.txt
+pip-delete-this-directory.txt
