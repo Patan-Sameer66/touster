@@ -19,6 +19,15 @@ class OllamaClient:
     ) -> str:
         """POST /api/chat and return assistant reply string."""
         chosen_model = model or self.model
+        if not chosen_model:
+            available = self.list_models()
+            if available:
+                chosen_model = available[0]
+            else:
+                raise RuntimeError(
+                    "Ollama: no model specified and none found. "
+                    "Run `ollama list` and set OLLAMA_MODEL in the config cell."
+                )
         payload = {
             "model": chosen_model,
             "messages": messages,
