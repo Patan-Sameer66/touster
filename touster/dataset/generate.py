@@ -102,6 +102,11 @@ def generate_dataset(
             remaining = num_samples - len(all_samples)
             current_batch = min(batch_size, remaining)
             batch = _generate_batch(client, prompt, current_batch, model, system_prompt)
+            if not batch:
+                raise RuntimeError(
+                    f"LLM returned an empty batch for topic {prompt!r}. "
+                    "Check your LLM configuration and prompt."
+                )
             all_samples.extend(batch[:current_batch])
             progress.update(task, advance=len(batch[:current_batch]))
 

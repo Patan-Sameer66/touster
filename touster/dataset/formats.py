@@ -31,17 +31,21 @@ def _apply_alpaca(sample: Sample) -> str:
     """
     Apply Alpaca template (single-turn: ### Instruction: / ### Response:).
     Uses the first user message as Instruction and first assistant message as Response.
+    System messages are prepended to the instruction.
     """
+    system_parts: list[str] = []
     instruction = ""
     response = ""
     for msg in sample.messages:
         if msg.role == "system":
-            instruction = msg.content + "\n\n" + instruction
+            system_parts.append(msg.content)
         elif msg.role == "user" and not instruction:
             instruction = msg.content
         elif msg.role == "assistant" and not response:
             response = msg.content
 
+    if system_parts:
+        instruction = "\n\n".join(system_parts) + "\n\n" + instruction
     return f"### Instruction:\n{instruction}\n\n### Response:\n{response}"
 
 

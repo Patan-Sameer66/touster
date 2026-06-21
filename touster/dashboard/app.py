@@ -214,59 +214,57 @@ class TuosterDashboard(App):
         self._loading = True
         self.query_one("#base-output", Static).update("[dim]Generating…[/dim]")
         self.query_one("#ft-output", Static).update("[dim]Generating…[/dim]")
-        self.run_worker(self._run_inference(prompt), thread=True)
+        self.run_worker(lambda: self._run_inference(prompt), thread=True)
 
-    async def _run_inference(self, prompt: str) -> None:  # type: ignore[override]
-        """Worker: loads models on first call, then runs inference in a thread."""
+    def _run_inference(self, prompt: str) -> None:
+        """Worker (runs in thread): loads models on first call, then runs inference."""
         try:
             if not self._models_loaded:
-                await self._load_models_async()
+                self.call_from_thread(self._set_status, "Loading models…")
+                try:
+                    from touster.dashboard.compare import ModelPair
+
+                    pair = ModelPair(
+                        base_model_id=self._base_model_id,
+                        adapter_path=self._adapter_path,
+                    )
+                    pair.load()
+                    self._pair = pair
+                    self._models_loaded = True
+                    status = (
+                        "Models loaded"
+                        if pair.has_adapter
+                        else "Fine-tuned adapter not found — showing base model only"
+                    )
+                    self.call_from_thread(self._set_status, status)
+                except Exception as exc:  # noqa: BLE001
+                    self.call_from_thread(self._set_status, f"Model load failed: {exc}")
+                    self._post_outputs(
+                        f"[red]Model load failed: {exc}[/red]",
+                        f"[red]Model load failed: {exc}[/red]",
+                    )
+                    return
 
             if self._pair is None:
                 self._post_outputs("[red]Models not available[/red]", "[red]Models not available[/red]")
                 return
 
-            from touster.dashboard.compare import ModelPair  # local import
+            from touster.dashboard.compare import ModelPair
 
             pair: ModelPair = self._pair  # type: ignore[assignment]
             base_out = pair.generate_base(prompt)
             ft_out = pair.generate_finetuned(prompt)
 
-            if not pair.has_adapter:
-                ft_display = f"[dim](No adapter — showing base)[/dim]\n\n{ft_out}"
-            else:
-                ft_display = ft_out
-
+            ft_display = (
+                f"[dim](No adapter — showing base)[/dim]\n\n{ft_out}"
+                if not pair.has_adapter
+                else ft_out
+            )
             self._post_outputs(base_out or "[dim](empty)[/dim]", ft_display or "[dim](empty)[/dim]")
         except Exception as exc:  # noqa: BLE001
             self._post_outputs(f"[red]Error: {exc}[/red]", f"[red]Error: {exc}[/red]")
         finally:
             self._loading = False
-
-    async def _load_models_async(self) -> None:
-        """Load ModelPair (heavy — runs in worker thread)."""
-        self.call_from_thread(self._set_status, "Loading models…")
-        try:
-            from touster.dashboard.compare import ModelPair  # lazy
-
-            pair = ModelPair(
-                base_model_id=self._base_model_id,
-                adapter_path=self._adapter_path,
-            )
-            pair.load()
-            self._pair = pair
-            self._models_loaded = True
-
-            if not pair.has_adapter:
-                self.call_from_thread(
-                    self._set_status,
-                    "Fine-tuned adapter not found — showing base model only",
-                )
-            else:
-                self.call_from_thread(self._set_status, "Models loaded")
-        except Exception as exc:  # noqa: BLE001
-            self.call_from_thread(self._set_status, f"Model load failed: {exc}")
-            raise
 
     def _post_outputs(self, base_text: str, ft_text: str) -> None:
         self.call_from_thread(self._update_outputs, base_text, ft_text)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -39,7 +40,7 @@ def print_preview(
         # Truncate long samples for display
         if len(formatted) > 500:
             formatted = formatted[:497] + "..."
-        sample_texts.append(f"[bold]Sample {i + 1}:[/bold]\n[touster.code]{formatted}[/touster.code]")
+        sample_texts.append(f"[bold]Sample {i + 1}:[/bold]\n[touster.code]{escape(formatted)}[/touster.code]")
 
     # ------------------------------------------------------------------
     # Token stats table

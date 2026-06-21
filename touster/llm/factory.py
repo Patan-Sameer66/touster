@@ -17,6 +17,8 @@ def build_client(
     - Otherwise: OllamaClient (local Ollama server)
     """
     if api_key:
+        if api_base and not api_base.startswith(("http://", "https://")):
+            api_base = "https://" + api_base
         base_url = api_base or "https://api.openai.com/v1"
         return OpenAIClient(api_key=api_key, base_url=base_url, model=model)
     return OllamaClient(port=ollama_port, model=model)

@@ -19,7 +19,7 @@ def _load_best_bpb(run_dir: Path) -> float | None:
     if not run_json.exists():
         return None
     try:
-        data = json.loads(run_json.read_text())
+        data = json.loads(run_json.read_text(encoding="utf-8"))
         bpb = data.get("best_bpb")
         if bpb is not None and bpb != float("inf"):
             return float(bpb)
@@ -34,7 +34,7 @@ def _load_dataset_size(run_dir: Path) -> int | None:
     if not jsonl.exists():
         return None
     try:
-        lines = [ln for ln in jsonl.read_text().splitlines() if ln.strip()]
+        lines = [ln for ln in jsonl.read_text(encoding="utf-8").splitlines() if ln.strip()]
         return len(lines)
     except Exception:  # noqa: BLE001
         return None
@@ -123,7 +123,7 @@ This model is a LoRA fine-tuned version of [{recipe.base_model}](https://hugging
 ## Dataset Info
 {dataset_section}
 Training data was processed and deduplicated by [Touster](https://github.com/touster).
-Run directory: `{run_dir}`
+Run directory: `{run_dir.as_posix()}`
 
 ## Evaluation
 {bpb_section}

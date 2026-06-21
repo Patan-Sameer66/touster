@@ -66,8 +66,9 @@ class UnslothBackend:
 
         formatted = raw_ds.map(_format)
 
+        import tempfile
         args = TrainingArguments(
-            output_dir="/tmp/touster_unsloth",
+            output_dir=str(Path(tempfile.gettempdir()) / "touster_unsloth"),
             max_steps=max_steps,
             per_device_train_batch_size=batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -105,11 +106,12 @@ class UnslothBackend:
         self._model.eval()
         total_loss = 0.0
         total_tokens = 0
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         with torch.no_grad():
             for i in range(len(eval_samples)):
-                input_ids = encodings["input_ids"][i].unsqueeze(0).cuda()
-                attention_mask = encodings["attention_mask"][i].unsqueeze(0).cuda()
-                labels = encodings["labels"][i].unsqueeze(0).cuda()
+                input_ids = encodings["input_ids"][i].unsqueeze(0).to(device)
+                attention_mask = encodings["attention_mask"][i].unsqueeze(0).to(device)
+                labels = encodings["labels"][i].unsqueeze(0).to(device)
                 outputs = self._model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
                 n_tokens = (labels != -100).sum().item()
                 total_loss += outputs.loss.item() * n_tokens
@@ -130,7 +132,8 @@ class UnslothBackend:
 
         assert self._model is not None and self._tokenizer is not None
         FastLanguageModel.for_inference(self._model)
-        inputs = self._tokenizer(prompt, return_tensors="pt").to("cuda")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(device)
         with torch.no_grad():
             output_ids = self._model.generate(**inputs, max_new_tokens=max_new_tokens)
         new_tokens = output_ids[0][inputs["input_ids"].shape[1]:]

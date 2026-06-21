@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from rich.console import Console
 from rich.theme import Theme
 
@@ -24,6 +26,21 @@ _THEME = Theme(
 console = Console(theme=_THEME)
 
 
+def _safe_char(char: str, fallback: str) -> str:
+    """Return char if the stdout encoding can represent it, else fallback."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        char.encode(enc)
+        return char
+    except (UnicodeEncodeError, LookupError):
+        return fallback
+
+
+_CHECK = _safe_char("✓", "OK")
+_WARN_SYM = _safe_char("⚠", "!!")
+_CROSS = _safe_char("✗", "XX")
+
+
 def print_step(n: int, total: int, title: str) -> None:
     console.rule(
         f"[touster.step]Step {n}/{total}[/touster.step] [touster.brand]{title}[/touster.brand]",
@@ -32,12 +49,12 @@ def print_step(n: int, total: int, title: str) -> None:
 
 
 def print_success(msg: str) -> None:
-    console.print(f"[touster.success]✓[/touster.success] {msg}")
+    console.print(f"[touster.success]{_CHECK}[/touster.success] {msg}")
 
 
 def print_warning(msg: str) -> None:
-    console.print(f"[touster.warning]⚠[/touster.warning]  {msg}")
+    console.print(f"[touster.warning]{_WARN_SYM}[/touster.warning]  {msg}")
 
 
 def print_error(msg: str) -> None:
-    console.print(f"[touster.error]✗[/touster.error] {msg}")
+    console.print(f"[touster.error]{_CROSS}[/touster.error] {msg}")

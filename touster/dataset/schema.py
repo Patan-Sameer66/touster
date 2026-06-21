@@ -96,7 +96,7 @@ def save_jsonl(ds: Dataset, path: Path) -> None:
     """Save a Dataset as .jsonl, one JSON object per line."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
         for sample in ds.samples:
             obj = {
                 "messages": [

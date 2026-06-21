@@ -61,16 +61,22 @@ def dedup_and_filter(
     ]
 
     # Step 2: near-duplicate removal
-    try:
-        deduped = _try_minhash_dedup(quality_filtered, similarity_threshold)
-    except ImportError:
-        # datasketch not available — fall back to exact-duplicate removal
+    def _exact_dedup(samples: list) -> list:
         seen: set[str] = set()
-        deduped = []
-        for sample in quality_filtered:
+        result = []
+        for sample in samples:
             key = _sample_text(sample)
             if key not in seen:
                 seen.add(key)
-                deduped.append(sample)
+                result.append(sample)
+        return result
+
+    try:
+        deduped = _try_minhash_dedup(quality_filtered, similarity_threshold)
+    except ImportError:
+        deduped = _exact_dedup(quality_filtered)
+    except Exception:
+        # datasketch runtime error — fall back to exact dedup
+        deduped = _exact_dedup(quality_filtered)
 
     return Dataset(samples=tuple(deduped))

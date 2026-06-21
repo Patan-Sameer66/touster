@@ -67,8 +67,12 @@ def load_dataset(path: Path) -> Dataset:
 
         if _is_alpaca_format(raw_lines):
             normalized = [_normalize_alpaca_sample(item) for item in raw_lines]
-            return from_list(normalized)
-        return from_list(raw_lines)
+            result = from_list(normalized)
+        else:
+            result = from_list(raw_lines)
+        if len(result) == 0:
+            raise ValueError(f"Dataset is empty: {path}")
+        return result
 
     elif suffix == ".json":
         with path.open("r", encoding="utf-8") as fh:
@@ -84,8 +88,12 @@ def load_dataset(path: Path) -> Dataset:
 
         if _is_alpaca_format(data):
             normalized = [_normalize_alpaca_sample(item) for item in data]
-            return from_list(normalized)
-        return from_list(data)
+            result = from_list(normalized)
+        else:
+            result = from_list(data)
+        if len(result) == 0:
+            raise ValueError(f"Dataset is empty: {path}")
+        return result
 
     else:
         raise ValueError(

@@ -35,10 +35,10 @@ def _fits_symbol(vram_bytes: int, entry: ModelEntry) -> str:
     available_gb = vram_bytes / 1e9
 
     if available_gb <= 0:
-        # CPU path: only tiny models are shown, mark them as fits
-        if entry.param_billions < 0.5:
-            return "[touster.success]✓[/touster.success]"
-        return "[touster.error]✗[/touster.error]"
+        # CPU path: only models under 2 GB RAM footprint are shown
+        if estimate_vram_needed(entry.param_billions, entry.default_quant_bits) < 2.0:
+            return "[touster.success]OK[/touster.success]"
+        return "[touster.error]XX[/touster.error]"
 
     ratio = available_gb / needed_gb if needed_gb > 0 else float("inf")
     if ratio >= (1 + _MARGINAL_THRESHOLD):
@@ -171,13 +171,18 @@ def print_hardware_report(
         "[touster.dim]Enter a model id from the table above, or press Enter to accept.[/touster.dim]"
     )
 
-    try:
-        chosen = Prompt.ask(
-            "[touster.brand]Model[/touster.brand]",
-            default=default_choice,
-            console=console,
-        )
-    except (EOFError, KeyboardInterrupt):
+    import sys
+    _interactive = sys.stdin is not None and hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+    if _interactive:
+        try:
+            chosen = Prompt.ask(
+                "[touster.brand]Model[/touster.brand]",
+                default=default_choice,
+                console=console,
+            )
+        except (EOFError, KeyboardInterrupt):
+            chosen = default_choice
+    else:
         chosen = default_choice
 
     # Resolve to hf_id if user typed a short id

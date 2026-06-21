@@ -216,6 +216,6 @@ def _encode_samples(samples: list[dict], tokenizer, max_length: int = 512) -> di
         return_tensors="pt",
     )
     labels = encoded["input_ids"].clone()
-    labels[labels == tokenizer.pad_token_id] = -100
+    labels[encoded["attention_mask"] == 0] = -100
     encoded["labels"] = labels
     return encoded

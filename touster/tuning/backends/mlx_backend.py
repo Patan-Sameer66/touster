@@ -59,7 +59,14 @@ class MLXBackend:
             "--adapter-path", str(tmp_adapter),
         ]
         start = time.time()
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=wall_clock_limit_secs or 3600)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=wall_clock_limit_secs or 3600
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"mlx_lm.lora timed out after {wall_clock_limit_secs or 3600}s"
+            )
         elapsed = time.time() - start
 
         if result.returncode != 0:
@@ -69,18 +76,8 @@ class MLXBackend:
         return {"steps": max_steps, "train_loss": float("nan")}
 
     def eval_loss(self, dataset_path: Path, eval_fraction: float = 0.1) -> float:
-        """Approximate eval via mlx_lm generate perplexity."""
-        from touster.tuning.backends.cpu_backend import _load_samples
-        from mlx_lm import generate
-
-        samples = _load_samples(dataset_path)
-        n_eval = max(1, int(len(samples) * eval_fraction))
-        eval_samples = samples[-n_eval:]
-
-        raise NotImplementedError(
-            "MLXBackend.eval_loss: mlx_lm does not expose per-token log-probs in this version. "
-            "Use bpb from validation loss logged during training instead."
-        )
+        """mlx_lm does not expose per-token log-probs; return nan so the loop can continue."""
+        return float("nan")
 
     def save_adapter(self, output_dir: Path) -> None:
         import shutil

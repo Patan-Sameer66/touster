@@ -76,7 +76,10 @@ class RecipeConfig:
         unknown = set(diff) - ALLOWED_RECIPE_KNOBS
         if unknown:
             raise ValueError(f"Agent proposed disallowed knobs: {unknown}")
-        return replace(self, **diff)
+        patched = dict(diff)
+        if "target_modules" in patched:
+            patched["target_modules"] = tuple(patched["target_modules"])
+        return replace(self, **patched)
 
 
 @dataclass(frozen=True)

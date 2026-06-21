@@ -30,7 +30,7 @@ def export_merged(adapter_path: Path, run_dir: Path, dtype: str = "float16") -> 
             "Ensure adapter_path points to a valid PEFT adapter directory."
         )
 
-    adapter_config = json.loads(adapter_config_path.read_text())
+    adapter_config = json.loads(adapter_config_path.read_text(encoding="utf-8"))
     base_model_id = adapter_config.get("base_model_name_or_path", "")
     if not base_model_id:
         raise RuntimeError(
@@ -71,10 +71,10 @@ def export_merged(adapter_path: Path, run_dir: Path, dtype: str = "float16") -> 
         # Save tokenizer if present in adapter dir or base model
         try:
             tokenizer = AutoTokenizer.from_pretrained(str(adapter_path))
-        except Exception:
+        except (OSError, EnvironmentError, ValueError):
             try:
                 tokenizer = AutoTokenizer.from_pretrained(base_model_id)
-            except Exception:
+            except (OSError, EnvironmentError, ValueError):
                 tokenizer = None
                 print_warning("Could not load tokenizer — skipping tokenizer save.")
 

@@ -36,6 +36,11 @@ def _repair_sample(sample: Sample) -> tuple[Sample | None, list[str]]:
             )
             continue
         normalized_role = _normalize_role(msg.role)
+        if normalized_role not in _VALID_ROLES:
+            warnings.append(
+                f"Removed message with unknown role {msg.role!r} (normalized: {normalized_role!r})"
+            )
+            continue
         if normalized_role != msg.role:
             warnings.append(
                 f"Normalized role {msg.role!r} -> {normalized_role!r}"

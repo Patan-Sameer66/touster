@@ -25,6 +25,13 @@ BANDWIDTH_TABLE: dict[str, float] = {
     "RTX 4080 SUPER": 736,
     "RTX 4070 SUPER": 504,
     "RTX 4070 Ti SUPER": 672,
+    # Colab/cloud GPUs
+    "Tesla T4": 300,
+    "T4": 300,
+    "A10G": 600,
+    "V100": 900,
+    "L4": 300,
+    # Apple Silicon
     "Apple M1": 68,
     "Apple M2": 100,
     "Apple M3": 150,
@@ -93,7 +100,7 @@ def _try_cuda() -> HardwareConfig | None:
 
 def _try_mlx() -> HardwareConfig | None:
     """Attempt Apple Silicon detection via mlx; returns None if unavailable."""
-    if platform.system() != "Darwin":
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
         return None
     try:
         import mlx  # type: ignore[import-untyped]  # noqa: F401
@@ -103,7 +110,9 @@ def _try_mlx() -> HardwareConfig | None:
     ram_bytes = psutil.virtual_memory().total
     cpu_count = psutil.cpu_count(logical=False) or 1
 
-    # Detect Apple chip name for bandwidth lookup
+    # Detect Apple chip name for bandwidth lookup.
+    # machdep.cpu.brand_string works on both Intel and Apple Silicon on modern macOS.
+    chip_raw = ""
     try:
         import subprocess
         result = subprocess.run(
@@ -114,7 +123,21 @@ def _try_mlx() -> HardwareConfig | None:
         )
         chip_raw = result.stdout.strip()
     except Exception:
-        chip_raw = ""
+        pass
+
+    if not chip_raw:
+        # Fallback: infer from hw.model (e.g. "MacBookPro18,3")
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["sysctl", "-n", "hw.model"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            chip_raw = result.stdout.strip()
+        except Exception:
+            pass
 
     gpu_name = chip_raw if chip_raw else "Apple Silicon"
     bandwidth_gbps = _lookup_bandwidth(gpu_name)

@@ -37,6 +37,7 @@ def main(
     model: Annotated[str, typer.Option("--model", help="Base model id (HF or Ollama).")] = "",
     dataset_mode: Annotated[int, typer.Option("--dataset-mode", min=0, max=2)] = 0,
     dataset_path: Annotated[Optional[Path], typer.Option("--dataset-path")] = None,
+    prompt: Annotated[str, typer.Option("--prompt", help="Topic/prompt for dataset generation (mode 0).")] = "",
     num_samples: Annotated[int, typer.Option("--num-samples")] = 200,
     max_trials: Annotated[int, typer.Option("--max-trials")] = 20,
     trial_steps: Annotated[int, typer.Option("--trial-steps")] = 200,
@@ -56,7 +57,7 @@ def main(
       5. Dashboard + export (GGUF / merged / model card).
     """
     console.print(
-        "\n[touster.brand]🍞  Touster[/touster.brand] — fine-tuning for people who don't want to become fine-tuning experts.\n",
+        "\n[touster.brand]Touster[/touster.brand] — fine-tuning for people who don't want to become fine-tuning experts.\n",
     )
 
     run_dir = run_dir.resolve()
@@ -71,6 +72,18 @@ def main(
     else:
         run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Initialize safe defaults so resume paths never reference undefined variables
+    _default_model = model or (state.base_model if state else "sshleifer/tiny-gpt2")
+    chosen_model: str = _default_model
+    validated_path: Path = (
+        Path(state.dataset_path) if (state and state.dataset_path) else (dataset_path or run_dir / "dataset.jsonl")
+    )
+    recipe: RecipeConfig = RecipeConfig(base_model=chosen_model)
+    best_recipe: RecipeConfig = recipe
+    adapter_path: Path = (
+        Path(state.final_adapter_path) if (state and state.final_adapter_path) else run_dir / "adapter"
+    )
+
     # ── Step 1: Hardware analysis ─────────────────────────────────────────────
     if state is None or state.phase == "init":
         print_step(1, TOTAL_STEPS, "Hardware analysis")
@@ -82,10 +95,8 @@ def main(
             if model:
                 chosen_model = model
         except ImportError as e:
-            print_warning = lambda m: console.print(f"[touster.warning]⚠  {m}[/touster.warning]")
-            print_warning(f"Hardware module not yet installed ({e}). Using CPU defaults.")
+            console.print(f"[touster.warning]!!  Hardware module not yet installed ({e}). Using CPU defaults.[/touster.warning]")
             from touster.config import HardwareConfig
-            hw = HardwareConfig(platform="cpu")
             chosen_model = model or "sshleifer/tiny-gpt2"
 
     # ── Step 2: Dataset ───────────────────────────────────────────────────────
@@ -103,6 +114,7 @@ def main(
 
             ds_cfg = DatasetConfig(
                 mode=dataset_mode,  # type: ignore[arg-type]
+                prompt=prompt,
                 num_samples=num_samples,
                 dataset_path=dataset_path,
             )
@@ -117,10 +129,12 @@ def main(
         try:
             from touster.dataset.preview import print_preview
             recipe = RecipeConfig(base_model=chosen_model)
+            best_recipe = recipe
             print_preview(validated_path, recipe)
-        except (ImportError, NameError):
+        except ImportError:
             console.print("[touster.dim]  (preview stub — building)[/touster.dim]")
-            recipe = RecipeConfig(base_model=model or "sshleifer/tiny-gpt2")
+            recipe = RecipeConfig(base_model=chosen_model)
+            best_recipe = recipe
 
     # ── Step 4: Self-improvement loop ─────────────────────────────────────────
     if state is None or state.phase in ("init", "dataset", "preview", "loop"):
@@ -135,8 +149,6 @@ def main(
             print_success(f"Winning recipe trained. Adapter at [touster.code]{adapter_path}[/touster.code]")
         except ImportError:
             console.print("[touster.dim]  (tuning module stub — building)[/touster.dim]")
-            adapter_path = run_dir / "adapter"
-            best_recipe = recipe
 
     # ── Step 5: Dashboard + Export ────────────────────────────────────────────
     print_step(5, TOTAL_STEPS, "Dashboard & export")

@@ -29,15 +29,15 @@ def _try_unsloth_gguf(
         adapter_config_path = adapter_path / "adapter_config.json"
         if not adapter_config_path.exists():
             return None
-        cfg = _json.loads(adapter_config_path.read_text())
+        cfg = _json.loads(adapter_config_path.read_text(encoding="utf-8"))
         base_model_id = cfg.get("base_model_name_or_path", "")
 
         with console.status("[touster.step]Loading model via Unsloth...[/touster.step]"):
+            # Load base model + adapter together; Unsloth auto-detects adapter dirs
             model, tokenizer = FastLanguageModel.from_pretrained(
-                model_name=base_model_id,
+                model_name=str(adapter_path),
                 load_in_4bit=False,
             )
-            model = FastLanguageModel.get_peft_model(model, adapter_path=str(adapter_path))
 
         gguf_dir = run_dir / "gguf"
         gguf_dir.mkdir(parents=True, exist_ok=True)
@@ -132,10 +132,10 @@ def _write_stub(merged_dir: Path, run_dir: Path, quantization: str) -> Path:
         "merged_path": str(merged_dir),
         "quantization": quantization,
     }
-    stub_path.write_text(json.dumps(stub_data, indent=2))
+    stub_path.write_text(json.dumps(stub_data, indent=2), encoding="utf-8")
 
     console.print(
-        "[touster.warning]⚠  GGUF export requires llama-cpp-python. "
+        "[touster.warning]!! GGUF export requires llama-cpp-python. "
         "Run: pip install llama-cpp-python[/touster.warning]"
     )
     console.print(
@@ -183,9 +183,9 @@ def export_gguf(
             "merged_path": str(adapter_path),
             "quantization": quantization,
         }
-        stub_path.write_text(json.dumps(stub_data, indent=2))
+        stub_path.write_text(json.dumps(stub_data, indent=2), encoding="utf-8")
         console.print(
-            "[touster.warning]⚠  GGUF export requires llama-cpp-python. "
+            "[touster.warning]!! GGUF export requires llama-cpp-python. "
             "Run: pip install llama-cpp-python[/touster.warning]"
         )
         return stub_path

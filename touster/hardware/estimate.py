@@ -34,7 +34,7 @@ def estimate_tokens_per_second(
 
     Formula: t/s ≈ bandwidth_GB/s / (param_billions * 1e9 * bits / 8 / 1e9)
     """
-    if bandwidth_gbps <= 0 or param_billions <= 0:
+    if bandwidth_gbps <= 0 or param_billions <= 0 or bits_per_param <= 0:
         return 0.0
 
     model_gb = param_billions * 1e9 * bits_per_param / 8 / 1e9

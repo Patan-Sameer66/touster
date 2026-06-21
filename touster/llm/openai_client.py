@@ -51,7 +51,7 @@ class OpenAIClient:
 
         if response.status_code != 200:
             raise RuntimeError(
-                f"OpenAI API error {response.status_code}: {response.text}"
+                f"OpenAI API error {response.status_code}: {response.text[:500]}"
             )
 
         data = response.json()
@@ -59,7 +59,7 @@ class OpenAIClient:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError) as exc:
             raise RuntimeError(
-                f"Unexpected OpenAI response shape: {data}"
+                f"Unexpected OpenAI response shape: {str(data)[:200]}"
             ) from exc
 
     def list_models(self) -> list[str]:

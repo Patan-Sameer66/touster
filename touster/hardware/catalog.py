@@ -18,7 +18,7 @@ class ModelEntry:
     arch: str                     # Architecture family
     quality_score: float          # 0-100 composite benchmark score (hand-curated)
     default_quant_bits: int       # 4 or 8
-    default_lora_targets: list[str]
+    default_lora_targets: tuple[str, ...]
 
 
 _CATALOG: list[ModelEntry] = [
@@ -31,7 +31,7 @@ _CATALOG: list[ModelEntry] = [
         arch="qwen2",
         quality_score=82.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     ModelEntry(
         id="qwen2.5-3b",
@@ -41,7 +41,7 @@ _CATALOG: list[ModelEntry] = [
         arch="qwen2",
         quality_score=72.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     ModelEntry(
         id="qwen2.5-0.5b",
@@ -51,7 +51,7 @@ _CATALOG: list[ModelEntry] = [
         arch="qwen2",
         quality_score=55.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     # ── Llama 3.x ─────────────────────────────────────────────────────────────
     ModelEntry(
@@ -62,7 +62,7 @@ _CATALOG: list[ModelEntry] = [
         arch="llama3",
         quality_score=74.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     ModelEntry(
         id="llama3.1-8b",
@@ -72,7 +72,7 @@ _CATALOG: list[ModelEntry] = [
         arch="llama3",
         quality_score=80.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     ModelEntry(
         id="llama3.2-1b",
@@ -82,7 +82,7 @@ _CATALOG: list[ModelEntry] = [
         arch="llama3",
         quality_score=60.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     # ── Mistral ───────────────────────────────────────────────────────────────
     ModelEntry(
@@ -93,7 +93,7 @@ _CATALOG: list[ModelEntry] = [
         arch="mistral",
         quality_score=78.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     # ── Phi-3 / Phi-3.5 ───────────────────────────────────────────────────────
     ModelEntry(
@@ -104,7 +104,7 @@ _CATALOG: list[ModelEntry] = [
         arch="phi3",
         quality_score=76.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     ModelEntry(
         id="phi3-mini-4k",
@@ -114,7 +114,7 @@ _CATALOG: list[ModelEntry] = [
         arch="phi3",
         quality_score=73.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     # ── Gemma 2 ───────────────────────────────────────────────────────────────
     ModelEntry(
@@ -125,7 +125,7 @@ _CATALOG: list[ModelEntry] = [
         arch="gemma",
         quality_score=70.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     ModelEntry(
         id="gemma2-9b",
@@ -135,7 +135,7 @@ _CATALOG: list[ModelEntry] = [
         arch="gemma",
         quality_score=83.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     # ── SmolLM2 ───────────────────────────────────────────────────────────────
     ModelEntry(
@@ -146,7 +146,7 @@ _CATALOG: list[ModelEntry] = [
         arch="llama",
         quality_score=65.0,
         default_quant_bits=4,
-        default_lora_targets=["q_proj", "v_proj"],
+        default_lora_targets=("q_proj", "v_proj"),
     ),
     # ── CPU validation / tiny model ───────────────────────────────────────────
     ModelEntry(
@@ -157,7 +157,7 @@ _CATALOG: list[ModelEntry] = [
         arch="gpt2",
         quality_score=5.0,
         default_quant_bits=8,
-        default_lora_targets=["c_attn"],
+        default_lora_targets=("c_attn",),
     ),
 ]
 

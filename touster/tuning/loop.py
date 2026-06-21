@@ -149,6 +149,12 @@ def run_loop(
 
     backend.unload()
 
+    if best_trial_id == -1:
+        raise RuntimeError(
+            "All trials failed — no valid adapter produced. "
+            "Check dataset quality and model configuration."
+        )
+
     # LLM-judge top-k finalists
     experiments = load_experiments(run_dir)
     if client and experiments:

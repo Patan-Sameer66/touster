@@ -82,7 +82,7 @@ def structure_dataset(
     ) as progress:
         task = progress.add_task("Processing chunks...", total=len(chunks))
 
-        for chunk in chunks:
+        for chunk_idx, chunk in enumerate(chunks, start=1):
             if len(all_samples) >= num_samples:
                 break
             messages = [
@@ -96,9 +96,17 @@ def structure_dataset(
                 reply = client.chat(messages, model=model, temperature=0.3, max_tokens=4096)
                 batch = _parse_llm_json(reply)
                 all_samples.extend(batch)
-            except (json.JSONDecodeError, ValueError, RuntimeError):
-                # Skip chunk on failure rather than crashing the whole run
-                pass
+            except (json.JSONDecodeError, ValueError, RuntimeError) as exc:
+                console.print(
+                    f"[touster.warning]Skipping chunk {chunk_idx}/{len(chunks)}"
+                    f" ({type(exc).__name__}: {exc})[/touster.warning]"
+                )
             progress.update(task, advance=1)
+
+    if not all_samples:
+        raise RuntimeError(
+            "structure_dataset: all chunks failed to produce samples. "
+            "Check LLM configuration and input text quality."
+        )
 
     return from_list(all_samples[:num_samples])

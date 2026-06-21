@@ -26,7 +26,10 @@ class ModelPair:
         # Fine-tuned backend ─ only when adapter directory actually exists
         if self._adapter_path is not None and self._adapter_path.exists():
             self._ft_backend = _AdapterInferenceBackend()
-            self._ft_backend.load(self._base_model_id, self._adapter_path)
+            try:
+                self._ft_backend.load(self._base_model_id, self._adapter_path)
+            except Exception:
+                self._ft_backend = None
         else:
             self._ft_backend = None
 

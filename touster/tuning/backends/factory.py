@@ -9,9 +9,9 @@ def get_backend(hw: HardwareConfig):
         try:
             from touster.tuning.backends.unsloth_backend import UnslothBackend
             return UnslothBackend()
-        except ImportError:
+        except (ImportError, RuntimeError, SystemExit):
             pass
-        # Fall through to CPU if unsloth not installed
+        # Fall through to HF/PEFT CUDA or CPU if unsloth not installed
     if hw.platform == "mlx":
         try:
             from touster.tuning.backends.mlx_backend import MLXBackend
