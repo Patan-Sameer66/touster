@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
@@ -42,7 +43,19 @@ def _parse_llm_json(text: str) -> list[dict]:
             line for line in lines
             if not line.startswith("```")
         ).strip()
-    return json.loads(text)
+    # Find start of JSON array (skip any leading prose)
+    start = text.find("[")
+    if start == -1:
+        raise ValueError("No JSON array found in LLM response")
+    text = text[start:]
+    # Fix invalid JSON escape sequences LLMs emit (e.g. \p, \U, \s, \()
+    # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX — everything else is illegal
+    text = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', text)
+    # raw_decode stops at end of first valid JSON value, ignoring trailing text
+    obj, _ = json.JSONDecoder().raw_decode(text)
+    if not isinstance(obj, list):
+        raise ValueError(f"Expected JSON array, got {type(obj).__name__}")
+    return obj
 
 
 def _generate_batch(
