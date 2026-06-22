@@ -33,6 +33,25 @@ _RETRY_ADDENDUM = (
 )
 
 
+def _salvage_objects(text: str) -> list[dict]:
+    """Scan text for individually-parseable JSON objects, skipping broken ones."""
+    decoder = json.JSONDecoder(strict=False)
+    objects: list[dict] = []
+    pos = 0
+    while pos < len(text):
+        start = text.find("{", pos)
+        if start == -1:
+            break
+        try:
+            obj, end = decoder.raw_decode(text, start)
+            if isinstance(obj, dict):
+                objects.append(obj)
+            pos = end
+        except json.JSONDecodeError:
+            pos = start + 1
+    return objects
+
+
 def _parse_llm_json(text: str) -> list[dict]:
     """Extract and parse a JSON array from LLM text, stripping markdown fences."""
     text = text.strip()
@@ -48,15 +67,23 @@ def _parse_llm_json(text: str) -> list[dict]:
     if start == -1:
         raise ValueError("No JSON array found in LLM response")
     text = text[start:]
-    # Fix invalid JSON escape sequences LLMs emit (e.g. \p, \U, \s, \()
-    # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX — everything else is illegal
+    # Fix invalid JSON escape sequences LLMs emit (e.g. \p, \U, \s)
+    # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX
     text = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', text)
-    # strict=False allows literal control chars (raw newlines) inside strings
-    # raw_decode stops at end of first valid JSON value, ignoring trailing text
-    obj, _ = json.JSONDecoder(strict=False).raw_decode(text)
-    if not isinstance(obj, list):
-        raise ValueError(f"Expected JSON array, got {type(obj).__name__}")
-    return obj
+    # strict=False: allow raw control characters inside strings
+    # raw_decode: stop at first complete JSON value, ignore trailing prose
+    try:
+        obj, _ = json.JSONDecoder(strict=False).raw_decode(text)
+        if not isinstance(obj, list):
+            raise ValueError(f"Expected JSON array, got {type(obj).__name__}")
+        return obj
+    except json.JSONDecodeError:
+        # Fallback: LLM embedded unescaped quotes (e.g. code examples).
+        # Salvage any individually-parseable objects from the broken array.
+        objects = _salvage_objects(text)
+        if not objects:
+            raise ValueError("Could not extract any valid objects from LLM response")
+        return objects
 
 
 def _generate_batch(
