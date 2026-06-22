@@ -24,8 +24,17 @@ def print_preview(
     - Starting hyperparameters from recipe
     - Estimated dataset size + note about API cost
     """
+    if n_samples < 0:
+        raise ValueError(f"n_samples must be >= 0, got {n_samples!r}")
+
     dataset_path = Path(dataset_path)
     ds = load_jsonl(dataset_path)
+
+    if not ds.samples:
+        console.print(
+            "[touster.warning]Warning:[/touster.warning] Dataset is empty — no samples to preview."
+        )
+        return
 
     chat_template = "chatml"
     stats = count_tokens_dataset(ds, template=chat_template)
@@ -37,9 +46,11 @@ def print_preview(
     sample_texts: list[str] = []
     for i, sample in enumerate(samples_to_show):
         formatted = apply_chat_template(sample, template=chat_template)
-        # Truncate long samples for display
+        # Truncate long samples for display at a word boundary
         if len(formatted) > 500:
-            formatted = formatted[:497] + "..."
+            truncated = formatted[:497]
+            last_space = truncated.rfind(" ")
+            formatted = (truncated[:last_space] if last_space > 400 else truncated) + "..."
         sample_texts.append(f"[bold]Sample {i + 1}:[/bold]\n[touster.code]{escape(formatted)}[/touster.code]")
 
     # ------------------------------------------------------------------
@@ -61,7 +72,8 @@ def print_preview(
     token_table.add_row("p95 tokens", str(stats["p95"]))
 
     # ------------------------------------------------------------------
-    # Hyperparameters table
+    # Hyperparameters table — use Text() to prevent markup injection from
+    # recipe attribute values (e.g. model names containing [ ])
     # ------------------------------------------------------------------
     hparam_table = Table(
         title="Starting Hyperparameters",
@@ -72,14 +84,14 @@ def print_preview(
     )
     hparam_table.add_column("Parameter", style="touster.dim")
     hparam_table.add_column("Value", justify="right")
-    hparam_table.add_row("base_model", str(recipe.base_model))
-    hparam_table.add_row("learning_rate", str(recipe.learning_rate))
-    hparam_table.add_row("lora_rank", str(recipe.lora_rank))
-    hparam_table.add_row("lora_alpha", str(recipe.lora_alpha))
-    hparam_table.add_row("num_epochs", str(recipe.num_epochs))
-    hparam_table.add_row("batch_size", str(recipe.batch_size))
-    hparam_table.add_row("max_steps", str(recipe.max_steps))
-    hparam_table.add_row("scheduler", str(recipe.scheduler))
+    hparam_table.add_row("base_model", Text(str(recipe.base_model)))
+    hparam_table.add_row("learning_rate", Text(str(recipe.learning_rate)))
+    hparam_table.add_row("lora_rank", Text(str(recipe.lora_rank)))
+    hparam_table.add_row("lora_alpha", Text(str(recipe.lora_alpha)))
+    hparam_table.add_row("num_epochs", Text(str(recipe.num_epochs)))
+    hparam_table.add_row("batch_size", Text(str(recipe.batch_size)))
+    hparam_table.add_row("max_steps", Text(str(recipe.max_steps)))
+    hparam_table.add_row("scheduler", Text(str(recipe.scheduler)))
 
     # ------------------------------------------------------------------
     # Render preview panel

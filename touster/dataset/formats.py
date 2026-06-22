@@ -18,11 +18,11 @@ def _apply_chatml(sample: Sample) -> str:
 
 
 def _apply_llama3(sample: Sample) -> str:
-    """Apply Llama 3 template."""
+    """Apply Llama 3 template (double newline after header per Meta spec)."""
     parts: list[str] = ["<|begin_of_text|>"]
     for msg in sample.messages:
         parts.append(
-            f"<|start_header_id|>{msg.role}<|end_header_id|>\n{msg.content}<|eot_id|>"
+            f"<|start_header_id|>{msg.role}<|end_header_id|>\n\n{msg.content}<|eot_id|>"
         )
     return "".join(parts)
 
@@ -32,6 +32,7 @@ def _apply_alpaca(sample: Sample) -> str:
     Apply Alpaca template (single-turn: ### Instruction: / ### Response:).
     Uses the first user message as Instruction and first assistant message as Response.
     System messages are prepended to the instruction.
+    Raises ValueError when instruction or response is missing.
     """
     system_parts: list[str] = []
     instruction = ""
@@ -44,8 +45,20 @@ def _apply_alpaca(sample: Sample) -> str:
         elif msg.role == "assistant" and not response:
             response = msg.content
 
-    if system_parts:
+    if not instruction:
+        raise ValueError(
+            "Alpaca template requires at least one 'user' message as the instruction."
+        )
+    if not response:
+        raise ValueError(
+            "Alpaca template requires at least one 'assistant' message as the response."
+        )
+
+    if system_parts and instruction:
         instruction = "\n\n".join(system_parts) + "\n\n" + instruction
+    elif system_parts:
+        instruction = "\n\n".join(system_parts)
+
     return f"### Instruction:\n{instruction}\n\n### Response:\n{response}"
 
 
@@ -76,6 +89,8 @@ def apply_chat_template(sample: Sample, template: str = "chatml") -> str:
 
 def estimate_token_count(text: str, chars_per_token: float = 3.8) -> int:
     """Quick approximation: int(len(text) / chars_per_token)."""
+    if chars_per_token <= 0:
+        raise ValueError(f"chars_per_token must be positive, got {chars_per_token}")
     return int(len(text) / chars_per_token)
 
 
@@ -96,7 +111,6 @@ def count_tokens_dataset(ds: Dataset, template: str = "chatml") -> dict:
     maximum = max(counts)
     minimum = min(counts)
 
-    # p95: index at 95th percentile
     sorted_counts = sorted(counts)
     p95_idx = min(int(math.ceil(0.95 * len(sorted_counts))) - 1, len(sorted_counts) - 1)
     p95 = sorted_counts[max(p95_idx, 0)]

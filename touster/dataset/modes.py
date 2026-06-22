@@ -25,7 +25,6 @@ def run_dataset_mode(
     Returns the path to the validated dataset file.
     """
     run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
     output_path = run_dir / "dataset.jsonl"
     total_steps = 3
 
@@ -45,7 +44,7 @@ def run_dataset_mode(
             client=client,
             prompt=cfg.prompt,
             num_samples=cfg.num_samples,
-            model="",
+            model=getattr(cfg, "model", ""),
         )
 
     elif cfg.mode == 1:
@@ -62,7 +61,7 @@ def run_dataset_mode(
             client=client,
             raw_text=raw_text,
             num_samples=cfg.num_samples,
-            model="",
+            model=getattr(cfg, "model", ""),
         )
 
     elif cfg.mode == 2:
@@ -89,6 +88,11 @@ def run_dataset_mode(
         removed = before - after
         if removed:
             print_warning(f"Removed {removed} duplicates/low-quality samples.")
+        if cfg.mode in (0, 1) and after < cfg.num_samples:
+            print_warning(
+                f"Only {after}/{cfg.num_samples} samples remain after dedup. "
+                "Consider generating more raw samples or lowering min_assistant_chars."
+            )
         print_success(f"{after} samples after dedup.")
     else:
         console.print("[touster.dim]Skipping dedup for mode 2 (bring-your-own).[/touster.dim]")
@@ -102,6 +106,14 @@ def run_dataset_mode(
     for w in warnings:
         print_warning(w)
 
+    if len(ds) == 0:
+        raise RuntimeError(
+            "Dataset is empty after dedup and validation. "
+            "Check input quality, LLM configuration, or reduce min_assistant_chars threshold."
+        )
+
+    # Create run_dir only when we are sure we have data to write
+    run_dir.mkdir(parents=True, exist_ok=True)
     save_jsonl(ds, output_path)
     print_success(f"Dataset saved to {output_path} ({len(ds)} samples).")
 

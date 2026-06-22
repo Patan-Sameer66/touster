@@ -21,20 +21,26 @@ def _normalize_role(role: str) -> str:
 def _repair_sample(sample: Sample) -> tuple[Sample | None, list[str]]:
     """
     Repair a single sample:
-    - Strip messages with empty content.
+    - Strip messages with empty content (warn when content is modified).
     - Normalize role strings.
+    - Enforce turn ordering: first non-system turn must be 'user',
+      no consecutive same-role turns.
     - Return None if sample lacks a user turn or assistant turn after repair.
     """
     warnings: list[str] = []
     repaired_messages: list[Message] = []
 
     for msg in sample.messages:
-        content = msg.content.strip()
-        if not content:
+        stripped = msg.content.strip()
+        if not stripped:
             warnings.append(
                 f"Removed message with empty content (role={msg.role!r})"
             )
             continue
+        if stripped != msg.content:
+            warnings.append(
+                f"Stripped whitespace from message content (role={msg.role!r})"
+            )
         normalized_role = _normalize_role(msg.role)
         if normalized_role not in _VALID_ROLES:
             warnings.append(
@@ -45,7 +51,7 @@ def _repair_sample(sample: Sample) -> tuple[Sample | None, list[str]]:
             warnings.append(
                 f"Normalized role {msg.role!r} -> {normalized_role!r}"
             )
-        repaired_messages.append(Message(role=normalized_role, content=content))
+        repaired_messages.append(Message(role=normalized_role, content=stripped))
 
     if not repaired_messages:
         warnings.append("Dropped sample: no messages remaining after cleanup.")
@@ -59,6 +65,21 @@ def _repair_sample(sample: Sample) -> tuple[Sample | None, list[str]]:
         warnings.append("Dropped sample: no 'assistant' turn after repair.")
         return None, warnings
 
+    # Enforce ordering: first non-system turn must be 'user';
+    # no consecutive same-role turns allowed.
+    non_system = [m for m in repaired_messages if m.role != "system"]
+    if non_system and non_system[0].role != "user":
+        warnings.append(
+            f"Dropped sample: first non-system turn is {non_system[0].role!r}, expected 'user'."
+        )
+        return None, warnings
+    for idx in range(len(non_system) - 1):
+        if non_system[idx].role == non_system[idx + 1].role:
+            warnings.append(
+                f"Dropped sample: consecutive {non_system[idx].role!r} turns at positions {idx},{idx+1}."
+            )
+            return None, warnings
+
     return Sample(messages=tuple(repaired_messages)), warnings
 
 
@@ -68,6 +89,7 @@ def validate_and_repair(ds: Dataset) -> tuple[Dataset, list[str]]:
     - Ensure every sample has at least 1 user turn and at least 1 assistant turn.
     - Strip empty content.
     - Normalize role strings.
+    - Enforce turn ordering.
     Returns (repaired_dataset, list_of_warnings).
     """
     all_warnings: list[str] = []
@@ -91,9 +113,14 @@ def validate_strict(ds: Dataset) -> list[str]:
     errors: list[str] = []
 
     for i, sample in enumerate(ds.samples):
-        roles = [m.role for m in sample.messages]
-        has_user = "user" in roles
-        has_assistant = "assistant" in roles
+        if not sample.messages:
+            errors.append(f"Sample {i}: has no messages.")
+            continue
+
+        # Normalize roles before checking so aliased roles don't produce false positives
+        normalized_roles = [_normalize_role(m.role) for m in sample.messages]
+        has_user = "user" in normalized_roles
+        has_assistant = "assistant" in normalized_roles
 
         if not has_user:
             errors.append(f"Sample {i}: missing 'user' turn.")
@@ -103,7 +130,7 @@ def validate_strict(ds: Dataset) -> list[str]:
         for j, msg in enumerate(sample.messages):
             if not msg.content.strip():
                 errors.append(f"Sample {i}, message {j}: empty content.")
-            if msg.role not in _VALID_ROLES:
+            if _normalize_role(msg.role) not in _VALID_ROLES:
                 errors.append(
                     f"Sample {i}, message {j}: unknown role {msg.role!r}."
                 )

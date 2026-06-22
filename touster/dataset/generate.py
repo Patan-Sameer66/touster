@@ -28,13 +28,29 @@ _USER_TEMPLATE = (
 )
 
 _RETRY_ADDENDUM = (
-    "\n\nIMPORTANT: Your previous response was not valid JSON. "
-    "Return ONLY the raw JSON array, no markdown fences, no leading text."
+    "IMPORTANT: Your previous response was not valid JSON. "
+    "Common mistakes to avoid:\n"
+    '- Unescaped double quotes inside strings: write \\" not "\n'
+    "- Backslashes must be doubled: write \\\\ not \\\n"
+    "- Return ONLY the raw JSON array, no markdown fences, no leading text.\n\n"
+    "Correct format:\n"
+    '[\n'
+    '  {{"messages": [{{"role": "user", "content": "What is X?"}},'
+    ' {{"role": "assistant", "content": "X is ..."}}]}}\n'
+    ']'
 )
+
+# Default max_tokens — raised to reduce truncation on long code examples
+_DEFAULT_MAX_TOKENS = 8192
+_DEFAULT_BATCH_SIZE = 5
 
 
 def _salvage_objects(text: str) -> list[dict]:
-    """Scan text for individually-parseable JSON objects, skipping broken ones."""
+    """Scan text for individually-parseable top-level sample objects, skipping broken ones.
+
+    Only returns dicts that have the required 'messages' key so that inner
+    message dicts from a truncated response are never mistaken for samples.
+    """
     decoder = json.JSONDecoder(strict=False)
     objects: list[dict] = []
     pos = 0
@@ -44,7 +60,7 @@ def _salvage_objects(text: str) -> list[dict]:
             break
         try:
             obj, end = decoder.raw_decode(text, start)
-            if isinstance(obj, dict):
+            if isinstance(obj, dict) and "messages" in obj:
                 objects.append(obj)
             pos = end
         except json.JSONDecodeError:
@@ -55,31 +71,36 @@ def _salvage_objects(text: str) -> list[dict]:
 def _parse_llm_json(text: str) -> list[dict]:
     """Extract and parse a JSON array from LLM text, stripping markdown fences."""
     text = text.strip()
-    # Strip markdown code fences if present
+    # Strip only the outermost markdown code fence (first and last fence lines)
     if text.startswith("```"):
         lines = text.splitlines()
-        text = "\n".join(
-            line for line in lines
-            if not line.startswith("```")
-        ).strip()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
     # Find start of JSON array (skip any leading prose)
     start = text.find("[")
     if start == -1:
         raise ValueError("No JSON array found in LLM response")
     text = text[start:]
-    # Fix invalid JSON escape sequences LLMs emit (e.g. \p, \U, \s)
+    # Fix invalid JSON escape sequences LLMs emit (e.g. \p, \U, \s).
+    # Negative lookbehind (?<!\\) prevents corrupting already-valid \\ pairs.
     # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX
-    text = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', text)
+    text = re.sub(r'(?<!\\)\\([^"\\/bfnrtu])', r'\\\\\1', text)
     # strict=False: allow raw control characters inside strings
     # raw_decode: stop at first complete JSON value, ignore trailing prose
     try:
         obj, _ = json.JSONDecoder(strict=False).raw_decode(text)
         if not isinstance(obj, list):
             raise ValueError(f"Expected JSON array, got {type(obj).__name__}")
+        if not all(isinstance(item, dict) for item in obj):
+            bad = [type(i).__name__ for i in obj if not isinstance(i, dict)]
+            raise ValueError(f"JSON array contains non-object items: {bad[:3]}")
         return obj
     except json.JSONDecodeError:
         # Fallback: LLM embedded unescaped quotes (e.g. code examples).
-        # Salvage any individually-parseable objects from the broken array.
+        # Salvage any individually-parseable top-level sample objects.
         objects = _salvage_objects(text)
         if not objects:
             raise ValueError("Could not extract any valid objects from LLM response")
@@ -92,26 +113,51 @@ def _generate_batch(
     batch_size: int,
     model: str,
     system_prompt: str,
+    max_tokens: int = _DEFAULT_MAX_TOKENS,
 ) -> list[dict]:
     """Generate one batch of samples, retrying once on parse failure."""
     messages = [
         {"role": "system", "content": system_prompt or _SYSTEM_PROMPT},
         {"role": "user", "content": _USER_TEMPLATE.format(batch_size=batch_size, topic=topic)},
     ]
-    reply = client.chat(messages, model=model, temperature=0.8, max_tokens=4096)
     try:
-        return _parse_llm_json(reply)
+        reply = client.chat(messages, model=model, temperature=0.8, max_tokens=max_tokens)
+    except Exception as exc:
+        raise RuntimeError(
+            f"LLM request failed for topic {topic!r} (batch_size={batch_size}): {exc}"
+        ) from exc
+
+    try:
+        batch = _parse_llm_json(reply)
     except (json.JSONDecodeError, ValueError):
         # Retry once with a clearer instruction
         messages.append({"role": "assistant", "content": reply})
         messages.append({"role": "user", "content": _RETRY_ADDENDUM})
-        reply2 = client.chat(messages, model=model, temperature=0.5, max_tokens=4096)
         try:
-            return _parse_llm_json(reply2)
+            reply2 = client.chat(messages, model=model, temperature=0.5, max_tokens=max_tokens)
+        except Exception as exc:
+            raise RuntimeError(
+                f"LLM retry request failed for topic {topic!r}: {exc}"
+            ) from exc
+        try:
+            batch = _parse_llm_json(reply2)
         except (json.JSONDecodeError, ValueError) as exc:
             raise RuntimeError(
                 f"LLM returned invalid JSON after retry. Last response: {reply2[:300]!r}"
             ) from exc
+
+    # Validate top-level shape before returning — inner message dicts or
+    # wrong-shaped objects must not silently propagate into all_samples.
+    if not all(isinstance(item, dict) and "messages" in item for item in batch):
+        bad_shapes = [
+            list(item.keys()) if isinstance(item, dict) else type(item).__name__
+            for item in batch[:3]
+        ]
+        raise RuntimeError(
+            f"LLM returned objects missing required 'messages' key. "
+            f"Got shapes: {bad_shapes}"
+        )
+    return batch
 
 
 def generate_dataset(
@@ -120,13 +166,16 @@ def generate_dataset(
     num_samples: int,
     model: str = "",
     system_prompt: str = "",
+    batch_size: int = _DEFAULT_BATCH_SIZE,
 ) -> Dataset:
     """
     Ask the LLM to generate num_samples fine-tuning examples about prompt.
-    Generates in batches of 5. Shows Rich progress bar.
+    Generates in batches. Shows Rich progress bar.
     Returns Dataset.
     """
-    batch_size = 5
+    if num_samples < 1:
+        raise ValueError(f"num_samples must be at least 1, got {num_samples}")
+
     all_samples: list[dict] = []
 
     with Progress(
@@ -151,4 +200,11 @@ def generate_dataset(
             all_samples.extend(batch[:current_batch])
             progress.update(task, advance=len(batch[:current_batch]))
 
-    return from_list(all_samples[:num_samples])
+    try:
+        return from_list(all_samples[:num_samples])
+    except ValueError as exc:
+        raise RuntimeError(
+            f"LLM-generated samples failed schema validation for topic {prompt!r}. "
+            f"This usually means the LLM returned malformed objects "
+            f"(missing 'messages' key, wrong nesting, etc.). Detail: {exc}"
+        ) from exc

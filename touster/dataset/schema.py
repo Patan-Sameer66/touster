@@ -58,6 +58,10 @@ def _parse_sample(raw: object) -> Sample:
         raise ValueError(
             f"Sample must have a 'messages' list, got: {raw!r}"
         )
+    if not msgs_raw:
+        raise ValueError(
+            f"Sample 'messages' list must not be empty, got: {raw!r}"
+        )
     messages = tuple(_parse_message(m) for m in msgs_raw)
     return Sample(messages=messages)
 
@@ -79,7 +83,8 @@ def load_jsonl(path: Path) -> Dataset:
     if not path.exists():
         raise FileNotFoundError(f"Dataset file not found: {path}")
     samples: list[Sample] = []
-    with path.open("r", encoding="utf-8") as fh:
+    # utf-8-sig transparently strips UTF-8 BOM when present
+    with path.open("r", encoding="utf-8-sig") as fh:
         for line_no, line in enumerate(fh, start=1):
             line = line.strip()
             if not line:
@@ -87,7 +92,9 @@ def load_jsonl(path: Path) -> Dataset:
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSON on line {line_no}: {exc}") from exc
+                raise ValueError(
+                    f"{path}:{line_no}: Invalid JSON: {exc.msg} (col {exc.colno})"
+                ) from exc
             samples.append(_parse_sample(obj))
     return Dataset(samples=tuple(samples))
 
@@ -96,7 +103,8 @@ def save_jsonl(ds: Dataset, path: Path) -> None:
     """Save a Dataset as .jsonl, one JSON object per line."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as fh:
+    # newline="" + explicit \n suffix ensures LF-only output on all platforms
+    with path.open("w", encoding="utf-8", newline="") as fh:
         for sample in ds.samples:
             obj = {
                 "messages": [

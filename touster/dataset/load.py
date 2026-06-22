@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from touster.dataset.schema import Dataset, Message, Sample, from_list, load_jsonl
+from touster.dataset.schema import Dataset, from_list
 
 
 _ALPACA_ROLE_MAP = {
@@ -19,20 +19,35 @@ def _normalize_alpaca_sample(item: dict) -> dict:
     """Convert HF-style {conversations: [{from, value}]} to {messages: [{role, content}]}."""
     conversations = item.get("conversations", [])
     messages = []
-    for turn in conversations:
-        from_role = turn.get("from", "")
-        value = turn.get("value", "")
+    for i, turn in enumerate(conversations):
+        from_role = turn.get("from")
+        value = turn.get("value")
+        if from_role is None or value is None:
+            raise ValueError(
+                f"Alpaca turn {i} missing required keys 'from' or 'value': {turn!r}"
+            )
         role = _ALPACA_ROLE_MAP.get(from_role.lower(), from_role)
         messages.append({"role": role, "content": value})
     return {"messages": messages}
 
 
 def _is_alpaca_format(data: list[dict]) -> bool:
-    """Check whether the dataset looks like HF alpaca/vicuna format."""
+    """Check whether ALL records use HF alpaca/vicuna format.
+
+    Raises ValueError if the format is inconsistent across records.
+    """
     if not data:
         return False
-    sample = data[0]
-    return "conversations" in sample and "messages" not in sample
+    has_conversations = [
+        "conversations" in s and "messages" not in s
+        for s in data
+    ]
+    if any(has_conversations) and not all(has_conversations):
+        raise ValueError(
+            "Mixed dataset format: some records use 'conversations', others use 'messages'. "
+            "All records must use the same format."
+        )
+    return all(has_conversations)
 
 
 def load_dataset(path: Path) -> Dataset:
@@ -53,8 +68,7 @@ def load_dataset(path: Path) -> Dataset:
     suffix = path.suffix.lower()
 
     if suffix == ".jsonl":
-        # Try standard first; also support alpaca-style jsonl
-        with path.open("r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8-sig") as fh:
             raw_lines: list[dict] = []
             for line_no, line in enumerate(fh, start=1):
                 line = line.strip()
@@ -63,19 +77,28 @@ def load_dataset(path: Path) -> Dataset:
                 try:
                     raw_lines.append(json.loads(line))
                 except json.JSONDecodeError as exc:
-                    raise ValueError(f"Invalid JSON on line {line_no}: {exc}") from exc
+                    raise ValueError(
+                        f"{path}:{line_no}: Invalid JSON: {exc.msg} (col {exc.colno})"
+                    ) from exc
 
         if _is_alpaca_format(raw_lines):
             normalized = [_normalize_alpaca_sample(item) for item in raw_lines]
-            result = from_list(normalized)
+            try:
+                result = from_list(normalized)
+            except ValueError as exc:
+                raise ValueError(f"Failed to parse dataset {path}: {exc}") from exc
         else:
-            result = from_list(raw_lines)
+            try:
+                result = from_list(raw_lines)
+            except ValueError as exc:
+                raise ValueError(f"Failed to parse dataset {path}: {exc}") from exc
+
         if len(result) == 0:
             raise ValueError(f"Dataset is empty: {path}")
         return result
 
     elif suffix == ".json":
-        with path.open("r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8-sig") as fh:
             try:
                 data = json.load(fh)
             except json.JSONDecodeError as exc:
@@ -88,9 +111,16 @@ def load_dataset(path: Path) -> Dataset:
 
         if _is_alpaca_format(data):
             normalized = [_normalize_alpaca_sample(item) for item in data]
-            result = from_list(normalized)
+            try:
+                result = from_list(normalized)
+            except ValueError as exc:
+                raise ValueError(f"Failed to parse dataset {path}: {exc}") from exc
         else:
-            result = from_list(data)
+            try:
+                result = from_list(data)
+            except ValueError as exc:
+                raise ValueError(f"Failed to parse dataset {path}: {exc}") from exc
+
         if len(result) == 0:
             raise ValueError(f"Dataset is empty: {path}")
         return result

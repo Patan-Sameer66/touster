@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import logging
+
 from touster.dataset.schema import Dataset, Sample
 
 
+logger = logging.getLogger(__name__)
+
+
 def _sample_text(sample: Sample) -> str:
-    """Concatenate all message contents into a single string for hashing."""
-    return " ".join(m.content for m in sample.messages)
+    """Canonical string encoding role+content boundaries for dedup hashing.
+
+    Uses null-byte and SOH as separators — characters that cannot appear in
+    parsed JSON string content — so different role/content splits never collide.
+    """
+    return "\x00".join(f"{m.role}\x01{m.content}" for m in sample.messages)
 
 
 def _assistant_chars(sample: Sample) -> int:
@@ -31,17 +40,33 @@ def _try_minhash_dedup(
         text = _sample_text(sample)
         tokens = set(text.lower().split())
         m = MinHash(num_perm=num_perm)
-        for token in tokens:
-            m.update(token.encode("utf-8"))
+        if not tokens:
+            # Empty token set: every empty sample produces an identical MinHash.
+            # Treat as a unique key derived from index so they are all kept.
+            m.update(f"__empty__{idx}".encode("utf-8"))
+        else:
+            for token in tokens:
+                m.update(token.encode("utf-8"))
 
         key = str(idx)
         result = lsh.query(m)
         if not result:
             lsh.insert(key, m)
             kept.append(sample)
-        # else: near-duplicate found — skip
 
     return kept
+
+
+def _exact_dedup(samples: list[Sample]) -> list[Sample]:
+    """Exact deduplication using the canonical sample text as key."""
+    seen: set[str] = set()
+    result = []
+    for sample in samples:
+        key = _sample_text(sample)
+        if key not in seen:
+            seen.add(key)
+            result.append(sample)
+    return result
 
 
 def dedup_and_filter(
@@ -51,32 +76,44 @@ def dedup_and_filter(
 ) -> Dataset:
     """
     1. Remove samples where the assistant turn has fewer than min_assistant_chars.
-    2. Near-duplicate removal using MinHashLSH (falls back to length filter if datasketch unavailable).
+    2. Near-duplicate removal using MinHashLSH (falls back to exact dedup if unavailable).
     3. Returns a new Dataset (immutable — no mutation of ds).
     """
+    if not (0.0 < similarity_threshold <= 1.0):
+        raise ValueError(
+            f"similarity_threshold must be in (0.0, 1.0], got {similarity_threshold!r}"
+        )
+
     # Step 1: quality filter
     quality_filtered = [
         s for s in ds.samples
         if _assistant_chars(s) >= min_assistant_chars
     ]
+    logger.info(
+        "Quality filter: %d → %d samples (removed %d)",
+        len(ds.samples), len(quality_filtered), len(ds.samples) - len(quality_filtered),
+    )
 
     # Step 2: near-duplicate removal
-    def _exact_dedup(samples: list) -> list:
-        seen: set[str] = set()
-        result = []
-        for sample in samples:
-            key = _sample_text(sample)
-            if key not in seen:
-                seen.add(key)
-                result.append(sample)
-        return result
-
+    used_minhash = False
     try:
         deduped = _try_minhash_dedup(quality_filtered, similarity_threshold)
+        used_minhash = True
     except ImportError:
         deduped = _exact_dedup(quality_filtered)
-    except Exception:
-        # datasketch runtime error — fall back to exact dedup
+    except MemoryError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "datasketch runtime error (%s: %s); falling back to exact dedup",
+            type(exc).__name__, exc,
+        )
         deduped = _exact_dedup(quality_filtered)
+
+    logger.info(
+        "Dedup (%s): %d → %d samples (removed %d)",
+        "minhash" if used_minhash else "exact",
+        len(quality_filtered), len(deduped), len(quality_filtered) - len(deduped),
+    )
 
     return Dataset(samples=tuple(deduped))
