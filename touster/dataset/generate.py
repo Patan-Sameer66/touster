@@ -51,8 +51,9 @@ def _parse_llm_json(text: str) -> list[dict]:
     # Fix invalid JSON escape sequences LLMs emit (e.g. \p, \U, \s, \()
     # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX — everything else is illegal
     text = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', text)
+    # strict=False allows literal control chars (raw newlines) inside strings
     # raw_decode stops at end of first valid JSON value, ignoring trailing text
-    obj, _ = json.JSONDecoder().raw_decode(text)
+    obj, _ = json.JSONDecoder(strict=False).raw_decode(text)
     if not isinstance(obj, list):
         raise ValueError(f"Expected JSON array, got {type(obj).__name__}")
     return obj
