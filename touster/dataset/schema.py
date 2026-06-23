@@ -62,6 +62,15 @@ def _parse_sample(raw: object) -> Sample:
         raise ValueError(
             f"Sample 'messages' list must not be empty, got: {raw!r}"
         )
+    # Unwrap double-nested messages: [[{role,content}, ...]] → [{role,content}, ...]
+    if msgs_raw and isinstance(msgs_raw[0], list):
+        flattened: list = []
+        for item in msgs_raw:
+            if isinstance(item, list):
+                flattened.extend(item)
+            else:
+                flattened.append(item)
+        msgs_raw = flattened
     messages = tuple(_parse_message(m) for m in msgs_raw)
     return Sample(messages=messages)
 
