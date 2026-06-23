@@ -155,7 +155,7 @@ def structure_dataset(
                 },
             ]
             try:
-                reply = client.chat(messages, model=model, temperature=0.3, max_tokens=8192)
+                reply = client.chat(messages, model=model, temperature=0.3, max_tokens=2048)
                 batch = _parse_llm_json(reply)
                 all_samples.extend(batch)
             except Exception as exc:

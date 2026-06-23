@@ -40,8 +40,8 @@ _RETRY_ADDENDUM = (
     ']'
 )
 
-# Default max_tokens — raised to reduce truncation on long code examples
-_DEFAULT_MAX_TOKENS = 8192
+# Default max_tokens — 2048 is enough for Q&A pairs; raise per-call if needed
+_DEFAULT_MAX_TOKENS = 2048
 _DEFAULT_BATCH_SIZE = 5
 
 
