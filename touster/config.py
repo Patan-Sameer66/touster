@@ -65,7 +65,7 @@ class RecipeConfig:
     learning_rate: float = 2e-4
     lora_rank: int = 16
     lora_alpha: int = 16
-    target_modules: tuple[str, ...] = ("c_attn",)
+    target_modules: tuple[str, ...] = ("q_proj", "v_proj")
     warmup_steps: int = 10
     num_epochs: int = 1
     max_steps: int = 200

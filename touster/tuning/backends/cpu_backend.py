@@ -34,10 +34,17 @@ class CPUBackend:
 
         base = AutoModelForCausalLM.from_pretrained(model_id)
 
+        effective_targets = _find_lora_targets(base, tuple(target_modules))
+        if set(effective_targets) != set(target_modules):
+            console.print(
+                f"  [touster.warning]target_modules {list(target_modules)} not in model — "
+                f"auto-detected: {effective_targets}[/touster.warning]"
+            )
+
         lora_cfg = LoraConfig(
             r=lora_rank,
             lora_alpha=lora_alpha,
-            target_modules=target_modules,
+            target_modules=effective_targets,
             bias="none",
             task_type="CAUSAL_LM",
         )
@@ -177,6 +184,31 @@ class CPUBackend:
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+def _find_lora_targets(model, requested: tuple[str, ...]) -> list[str]:
+    """Return LoRA target module names that actually exist in model.
+
+    If none of the requested names match, auto-detects attention/MLP linear
+    layers so any model architecture works without manual config.
+    """
+    import torch.nn as nn
+
+    present = {name.split(".")[-1] for name, m in model.named_modules() if isinstance(m, nn.Linear)}
+    matched = [t for t in requested if t in present]
+    if matched:
+        return matched
+
+    # Priority-ordered candidates covering LLaMA/Qwen/Mistral/Phi/GPT-2/Falcon
+    candidates = [
+        "q_proj", "k_proj", "v_proj", "o_proj",      # LLaMA · Qwen · Mistral · Phi
+        "gate_proj", "up_proj", "down_proj",           # LLaMA · Qwen MLP
+        "c_attn", "c_proj",                            # GPT-2
+        "query_key_value", "dense",                    # Falcon · MPT
+        "dense_h_to_4h", "dense_4h_to_h",             # Falcon MLP
+    ]
+    detected = [c for c in candidates if c in present]
+    return detected if detected else list(present)
+
 
 def _load_samples(path: Path) -> list[dict]:
     """Load JSONL dataset. Returns list of {messages: [...]} dicts."""
