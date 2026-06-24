@@ -108,8 +108,10 @@ def run_loop(
                     print_warning(f"Invalid proposal {diff}: {e}. Skipping.")
                     diff = {}
 
-            # Reload model with potentially new LoRA config
-            if diff:
+            # Reload model only when LoRA structure changed (rank/alpha/targets).
+            # Learning rate, scheduler, batch_size etc. don't require a reload.
+            _STRUCTURAL = {"lora_rank", "lora_alpha", "target_modules"}
+            if diff and _STRUCTURAL.intersection(diff):
                 backend.unload()
                 backend.load_model(
                     model_id=recipe.base_model,

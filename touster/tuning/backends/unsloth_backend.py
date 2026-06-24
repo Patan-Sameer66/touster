@@ -22,13 +22,22 @@ class UnslothBackend:
         lora_alpha: int,
         target_modules: list[str],
     ) -> None:
+        import io
+        import sys
+        from contextlib import redirect_stdout, redirect_stderr
         from unsloth import FastLanguageModel
 
         console.print(f"  [touster.dim]Loading [touster.model]{model_id}[/touster.model] via Unsloth…[/touster.dim]")
-        self._model, self._tokenizer = FastLanguageModel.from_pretrained(
-            model_name=model_id,
-            load_in_4bit=True,
-        )
+
+        # Suppress Unsloth's verbose banner.
+        # Without this, Unsloth calls print(statistics) inside a Rich context manager
+        # which triggers a FileProxy flush → IPython display → flush → infinite recursion.
+        _sink = io.StringIO()
+        with redirect_stdout(_sink), redirect_stderr(_sink):
+            self._model, self._tokenizer = FastLanguageModel.from_pretrained(
+                model_name=model_id,
+                load_in_4bit=True,
+            )
 
         effective_targets = _find_lora_targets(self._model, target_modules)
         if set(effective_targets) != set(target_modules):
