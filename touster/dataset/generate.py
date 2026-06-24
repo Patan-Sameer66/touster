@@ -10,35 +10,43 @@ from touster.dataset.schema import Dataset, from_list
 
 
 _SYSTEM_PROMPT = (
-    "You are a fine-tuning data generator. "
-    "Generate high-quality question-and-answer training examples. "
-    "Return ONLY a valid JSON array. No markdown, no explanation outside the JSON."
+    "You are a fine-tuning dataset generator. "
+    "Output ONLY a valid JSON array — nothing else. "
+    "No markdown fences, no comments, no trailing commas, no text before or after the JSON."
 )
 
-_USER_TEMPLATE = (
-    "Generate {batch_size} fine-tuning examples about: {topic}\n\n"
-    "Output a JSON array of objects. Each object must have a 'messages' key containing "
-    "a list of message objects with 'role' and 'content' fields. "
-    "Use role 'user' for questions and 'assistant' for answers.\n\n"
-    "Example format:\n"
-    '[\n'
-    '  {{"messages": [{{"role": "user", "content": "What is X?"}},'
-    ' {{"role": "assistant", "content": "X is ..."}}]}}\n'
-    ']'
-)
+_USER_TEMPLATE = """\
+Generate {batch_size} question-and-answer training examples about: {topic}
 
-_RETRY_ADDENDUM = (
-    "IMPORTANT: Your previous response was not valid JSON. "
-    "Common mistakes to avoid:\n"
-    '- Unescaped double quotes inside strings: write \\" not "\n'
-    "- Backslashes must be doubled: write \\\\ not \\\n"
-    "- Return ONLY the raw JSON array, no markdown fences, no leading text.\n\n"
-    "Correct format:\n"
-    '[\n'
-    '  {{"messages": [{{"role": "user", "content": "What is X?"}},'
-    ' {{"role": "assistant", "content": "X is ..."}}]}}\n'
-    ']'
-)
+Return a JSON array. Each element MUST follow this EXACT structure:
+[
+  {{"messages": [{{"role": "user", "content": "question"}}, {{"role": "assistant", "content": "answer"}}]}}
+]
+
+STRICT RULES — violating any rule will break parsing:
+1. Start your response with [ and end with ] — nothing outside
+2. No trailing commas after the last item in any array or object
+3. No markdown code fences (no ```)
+4. No comments (// or /* */)
+5. All strings use double quotes, never single quotes
+6. Escape double quotes inside strings as \\"
+
+Output {batch_size} elements in the array. Only output the JSON.\
+"""
+
+_RETRY_ADDENDUM = """\
+Your previous response was not valid JSON. The most common causes:
+- TRAILING COMMAS: `"content": "answer",` followed by `}}` — remove the comma
+- Markdown fences: remove ``` lines entirely
+- Text before/after the array: output ONLY [ ... ]
+
+Correct minimal format (copy exactly):
+[
+  {{"messages": [{{"role": "user", "content": "What is X?"}}, {{"role": "assistant", "content": "X is ..."}}]}}
+]
+
+Try again. Output ONLY the JSON array, no other text.\
+"""
 
 # Default max_tokens — 2048 is enough for Q&A pairs; raise per-call if needed
 _DEFAULT_MAX_TOKENS = 2048
@@ -68,28 +76,39 @@ def _salvage_objects(text: str) -> list[dict]:
     return objects
 
 
+def _repair_json(text: str) -> str:
+    """Heuristic repairs for the most common LLM JSON mistakes."""
+    # Remove JS-style // comments (outside strings — good enough for LLM output)
+    text = re.sub(r'//[^\n]*', '', text)
+    # Remove JS-style /* */ block comments
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    # Strip trailing commas before ] or } — the #1 LLM JSON mistake
+    # Loop until stable (nested trailing commas after repair)
+    prev = None
+    while prev != text:
+        prev = text
+        text = re.sub(r',(\s*[}\]])', r'\1', text)
+    return text
+
+
 def _parse_llm_json(text: str) -> list[dict]:
-    """Extract and parse a JSON array from LLM text, stripping markdown fences."""
+    """Extract and parse a JSON array from LLM text."""
     text = text.strip()
-    # Strip only the outermost markdown code fence (first and last fence lines)
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
+    # Strip all markdown code fences
+    text = re.sub(r'^```[^\n]*\n?', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\n?```\s*$', '', text, flags=re.MULTILINE)
+    text = text.strip()
     # Find start of JSON array (skip any leading prose)
     start = text.find("[")
     if start == -1:
         raise ValueError("No JSON array found in LLM response")
     text = text[start:]
-    # Fix invalid JSON escape sequences LLMs emit (e.g. \p, \U, \s).
-    # Negative lookbehind (?<!\\) prevents corrupting already-valid \\ pairs.
-    # Valid JSON escapes: \" \\ \/ \b \f \n \r \t \uXXXX
+    # Fix invalid JSON escape sequences LLMs emit (e.g. \p, \s, \U).
+    # Negative lookbehind prevents corrupting valid \\ pairs.
     text = re.sub(r'(?<!\\)\\([^"\\/bfnrtu])', r'\\\\\1', text)
+    # Apply heuristic repairs (trailing commas, comments)
+    text = _repair_json(text)
     # strict=False: allow raw control characters inside strings
-    # raw_decode: stop at first complete JSON value, ignore trailing prose
     try:
         obj, _ = json.JSONDecoder(strict=False).raw_decode(text)
         if not isinstance(obj, list):
@@ -99,8 +118,7 @@ def _parse_llm_json(text: str) -> list[dict]:
             raise ValueError(f"JSON array contains non-object items: {bad[:3]}")
         return obj
     except json.JSONDecodeError:
-        # Fallback: LLM embedded unescaped quotes (e.g. code examples).
-        # Salvage any individually-parseable top-level sample objects.
+        # Fallback: salvage individually-parseable sample objects
         objects = _salvage_objects(text)
         if not objects:
             raise ValueError("Could not extract any valid objects from LLM response")
