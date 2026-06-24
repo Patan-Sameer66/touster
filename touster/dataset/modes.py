@@ -44,7 +44,8 @@ def run_dataset_mode(
             client=client,
             prompt=cfg.prompt,
             num_samples=cfg.num_samples,
-            model=getattr(cfg, "model", ""),
+            model=cfg.model,
+            batch_size=cfg.gen_batch_size,
         )
 
     elif cfg.mode == 1:
@@ -61,7 +62,7 @@ def run_dataset_mode(
             client=client,
             raw_text=raw_text,
             num_samples=cfg.num_samples,
-            model=getattr(cfg, "model", ""),
+            model=cfg.model,
         )
 
     elif cfg.mode == 2:

@@ -51,7 +51,9 @@ class DatasetConfig:
     prompt: str = ""
     raw_data_path: Path | None = None
     dataset_path: Path | None = None
-    num_samples: int = 200
+    num_samples: int = 50
+    gen_batch_size: int = 10
+    model: str = ""
     eval_fraction: float = 0.1
 
 
