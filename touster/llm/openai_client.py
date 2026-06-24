@@ -28,6 +28,7 @@ class OpenAIClient:
         model: str = "",
         temperature: float = 0.7,
         max_tokens: int = 2048,
+        format: str = "",
     ) -> str:
         """Send messages to /chat/completions and return assistant reply."""
         chosen_model = model or self.model
@@ -37,6 +38,8 @@ class OpenAIClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if format == "json":
+            payload["response_format"] = {"type": "json_object"}
         try:
             response = httpx.post(
                 f"{self.base_url}/chat/completions",

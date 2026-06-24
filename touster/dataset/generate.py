@@ -139,7 +139,7 @@ def _generate_batch(
         {"role": "user", "content": _USER_TEMPLATE.format(batch_size=batch_size, topic=topic)},
     ]
     try:
-        reply = client.chat(messages, model=model, temperature=0.8, max_tokens=max_tokens)
+        reply = client.chat(messages, model=model, temperature=0.8, max_tokens=max_tokens, format="json")
     except Exception as exc:
         raise RuntimeError(
             f"LLM request failed for topic {topic!r} (batch_size={batch_size}): {exc}"
@@ -152,7 +152,7 @@ def _generate_batch(
         messages.append({"role": "assistant", "content": reply})
         messages.append({"role": "user", "content": _RETRY_ADDENDUM})
         try:
-            reply2 = client.chat(messages, model=model, temperature=0.5, max_tokens=max_tokens)
+            reply2 = client.chat(messages, model=model, temperature=0.5, max_tokens=max_tokens, format="json")
         except Exception as exc:
             raise RuntimeError(
                 f"LLM retry request failed for topic {topic!r}: {exc}"

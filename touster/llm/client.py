@@ -13,6 +13,7 @@ class LLMClient(Protocol):
         model: str = "",
         temperature: float = 0.7,
         max_tokens: int = 2048,
+        format: str = "",
     ) -> str:
         """Send messages, return assistant reply string."""
         ...

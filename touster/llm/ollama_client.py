@@ -16,6 +16,7 @@ class OllamaClient:
         model: str = "",
         temperature: float = 0.7,
         max_tokens: int = 2048,
+        format: str = "",
     ) -> str:
         """POST /api/chat and return assistant reply string."""
         chosen_model = model or self.model
@@ -37,6 +38,8 @@ class OllamaClient:
                 "num_predict": max_tokens,
             },
         }
+        if format:
+            payload["format"] = format
         try:
             response = httpx.post(
                 f"{self.base_url}/api/chat",
