@@ -66,9 +66,11 @@ class UnslothBackend:
         scheduler: str,
         wall_clock_limit_secs: int = 0,
     ) -> dict:
-        from trl import SFTTrainer
-        from transformers import TrainingArguments
+        import tempfile
         from datasets import load_dataset as hf_load
+        from transformers import TrainingArguments
+        from trl import SFTTrainer
+        from unsloth import is_bfloat16_supported
 
         assert self._model is not None and self._tokenizer is not None
 
@@ -81,9 +83,9 @@ class UnslothBackend:
                 text += f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n"
             return {"text": text}
 
-        formatted = raw_ds.map(_format)
+        formatted = raw_ds.map(_format, remove_columns=raw_ds.column_names)
 
-        import tempfile
+        use_bf16 = is_bfloat16_supported()
         args = TrainingArguments(
             output_dir=str(Path(tempfile.gettempdir()) / "touster_unsloth"),
             max_steps=max_steps,
@@ -92,15 +94,19 @@ class UnslothBackend:
             learning_rate=learning_rate,
             warmup_steps=warmup_steps,
             lr_scheduler_type=scheduler,
-            fp16=True,
-            logging_steps=10,
+            fp16=not use_bf16,
+            bf16=use_bf16,
+            optim="adamw_8bit",
+            logging_steps=max(1, max_steps // 5),
             save_steps=max_steps + 1,
+            report_to="none",
         )
         trainer = SFTTrainer(
             model=self._model,
             tokenizer=self._tokenizer,
             train_dataset=formatted,
             dataset_text_field="text",
+            max_seq_length=512,
             args=args,
         )
         start = time.time()

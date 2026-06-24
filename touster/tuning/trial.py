@@ -47,7 +47,9 @@ def run_trial(
             wall_clock_limit_secs=loop_cfg.trial_wall_clock_secs,
         )
     except Exception as e:
+        import traceback
         console.print(f"  [touster.error]Trial {trial_id} training failed: {e}[/touster.error]")
+        console.print(traceback.format_exc())
         return float("inf"), None
 
     elapsed = time.time() - start
