@@ -6,6 +6,7 @@ from touster.config import DatasetConfig
 from touster.console import console, print_step, print_success, print_warning
 from touster.dataset.dedup import dedup_and_filter
 from touster.dataset.generate import generate_dataset
+from touster.dataset.hub import detect_source_type, download_url, load_hf_dataset
 from touster.dataset.load import load_dataset
 from touster.dataset.schema import Dataset, save_jsonl
 from touster.dataset.structure import structure_dataset
@@ -68,8 +69,8 @@ def run_dataset_mode(
     elif cfg.mode == 2:
         if cfg.dataset_path is None:
             raise ValueError("Mode 2 (bring-your-own) requires dataset_path.")
-        ds_path = Path(cfg.dataset_path)
-        console.print(f"[touster.dim]Loading existing dataset from {ds_path}[/touster.dim]")
+        ds_path = _resolve_dataset_source(str(cfg.dataset_path), run_dir)
+        console.print(f"[touster.dim]Loading dataset from {ds_path}[/touster.dim]")
         ds = load_dataset(ds_path)
 
     else:
@@ -119,3 +120,46 @@ def run_dataset_mode(
     print_success(f"Dataset saved to {output_path} ({len(ds)} samples).")
 
     return output_path
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _resolve_dataset_source(source: str, run_dir: Path) -> Path:
+    """Resolve a dataset source to a local file path.
+
+    Handles:
+    - Local file paths (returned as-is)
+    - Direct URLs (downloaded to run_dir/cache/)
+    - HuggingFace dataset IDs like "author/dataset-name[/split]"
+    """
+    src_type = detect_source_type(source)
+
+    if src_type == "local":
+        return Path(source)
+
+    cache_dir = run_dir / "cache"
+
+    if src_type == "url":
+        return download_url(source, cache_dir)
+
+    # HuggingFace dataset ID — may include a split suffix "author/name/split"
+    parts = source.split("/")
+    if len(parts) == 3:
+        repo_id = "/".join(parts[:2])
+        split = parts[2]
+    else:
+        repo_id = source
+        split = "train"
+
+    raw_records = load_hf_dataset(repo_id, split=split, cache_dir=cache_dir)
+    if not raw_records:
+        raise RuntimeError(f"HuggingFace dataset '{source}' returned 0 convertible samples.")
+
+    # Save to a local JSONL so the normal load_dataset path handles it
+    import json
+    local_path = cache_dir / f"{source.replace('/', '__')}_{split}.jsonl"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    with local_path.open("w", encoding="utf-8", newline="") as f:
+        for rec in raw_records:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return local_path
