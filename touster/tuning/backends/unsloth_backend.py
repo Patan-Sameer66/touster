@@ -29,11 +29,19 @@ class UnslothBackend:
             model_name=model_id,
             load_in_4bit=True,
         )
+
+        effective_targets = _find_lora_targets(self._model, target_modules)
+        if set(effective_targets) != set(target_modules):
+            console.print(
+                f"  [touster.warning]target_modules {list(target_modules)} not in model — "
+                f"auto-detected: {effective_targets}[/touster.warning]"
+            )
+
         self._model = FastLanguageModel.get_peft_model(
             self._model,
             r=lora_rank,
             lora_alpha=lora_alpha,
-            target_modules=target_modules,
+            target_modules=effective_targets,
             bias="none",
             use_gradient_checkpointing="unsloth",
         )
@@ -144,3 +152,29 @@ class UnslothBackend:
         self._model = None
         self._tokenizer = None
         torch.cuda.empty_cache()
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _find_lora_targets(model, requested: list[str]) -> list[str]:
+    """Return LoRA target module names that actually exist in model.
+
+    Mirrors cpu_backend._find_lora_targets — kept in sync so both backends
+    auto-detect the correct layers for any model architecture.
+    """
+    import torch.nn as nn
+
+    present = {name.split(".")[-1] for name, m in model.named_modules() if isinstance(m, nn.Linear)}
+    matched = [t for t in requested if t in present]
+    if matched:
+        return matched
+
+    candidates = [
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+        "c_attn", "c_proj",
+        "query_key_value", "dense",
+        "dense_h_to_4h", "dense_4h_to_h",
+    ]
+    detected = [c for c in candidates if c in present]
+    return detected if detected else list(present)
