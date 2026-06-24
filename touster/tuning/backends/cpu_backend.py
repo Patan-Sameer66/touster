@@ -222,7 +222,7 @@ def _load_samples(path: Path) -> list[dict]:
     return samples
 
 
-def _encode_samples(samples: list[dict], tokenizer, max_length: int = 512) -> dict | None:
+def _encode_samples(samples: list[dict], tokenizer, max_length: int = 256) -> dict | None:
     """Encode samples to tensors using simple text concatenation."""
     import torch
 
