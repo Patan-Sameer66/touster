@@ -68,6 +68,7 @@ def run_loop(
     # Resume from checkpoint if present
     ckpt = load_checkpoint(run_dir)
     current_recipe = recipe
+    best_recipe = recipe  # the recipe that produced best_bpb (used for final run)
     best_bpb = ckpt.best_bpb if ckpt else float("inf")
     best_trial_id = ckpt.best_trial_id if ckpt else -1
     start_trial = ckpt.current_trial if ckpt else 0
@@ -77,6 +78,9 @@ def run_loop(
 
     program_md = program_path.read_text()
     last_bpb = best_bpb
+    # Track which LoRA structure is currently loaded so we reload only when it
+    # actually changes — and never run a recipe against a mismatched adapter.
+    loaded_structure = _structure(current_recipe)
 
     console.rule(
         f"[touster.brand]Self-improvement loop[/touster.brand] — "
@@ -95,23 +99,31 @@ def run_loop(
         progress.advance(task, start_trial)
 
         for trial_id in range(start_trial, loop_cfg.max_trials):
-            # Propose recipe change
+            # Propose a change BRANCHING FROM THE BEST recipe so far — not the
+            # last (possibly worse) one. This prevents a single bad trial from
+            # dragging the whole search downward (lr-halving death spiral).
             diff: dict = {}
             if trial_id > 0:
                 if client and loop_cfg.use_llm_proposer:
-                    diff = propose_llm(client, current_recipe, program_md, last_bpb, best_bpb, trial_id)
+                    diff = propose_llm(client, best_recipe, program_md, last_bpb, best_bpb, trial_id)
                 else:
-                    diff = propose_heuristic(current_recipe, trial_id, last_bpb, best_bpb)
+                    diff = propose_heuristic(best_recipe, trial_id, last_bpb, best_bpb)
                 try:
-                    current_recipe = current_recipe.apply_diff(diff)
+                    current_recipe = best_recipe.apply_diff(diff)
                 except ValueError as e:
                     print_warning(f"Invalid proposal {diff}: {e}. Skipping.")
                     diff = {}
+                    current_recipe = best_recipe
+                # Skip no-op proposals that would waste a full trial
+                if diff and all(getattr(best_recipe, k) == getattr(current_recipe, k)
+                                for k in diff):
+                    print_warning(f"Trial {trial_id}: proposal {diff} is a no-op. Skipping.")
+                    progress.advance(task)
+                    continue
 
-            # Reload model only when LoRA structure changed (rank/alpha/targets).
-            # Learning rate, scheduler, batch_size etc. don't require a reload.
-            _STRUCTURAL = {"lora_rank", "lora_alpha", "target_modules"}
-            if diff and _STRUCTURAL.intersection(diff):
+            # Reload only when the LoRA structure actually differs from what is
+            # loaded — correct regardless of which recipe we branched from.
+            if _structure(current_recipe) != loaded_structure:
                 backend.unload()
                 backend.load_model(
                     model_id=recipe.base_model,
@@ -119,6 +131,7 @@ def run_loop(
                     lora_alpha=current_recipe.lora_alpha,
                     target_modules=current_recipe.target_modules,
                 )
+                loaded_structure = _structure(current_recipe)
 
             bpb, adapter_path = run_trial(
                 trial_id=trial_id,
@@ -135,6 +148,7 @@ def run_loop(
             if bpb < best_bpb:
                 best_bpb = bpb
                 best_trial_id = trial_id
+                best_recipe = current_recipe  # snapshot the winning recipe
 
             # Checkpoint loop state
             save_checkpoint(
@@ -164,20 +178,29 @@ def run_loop(
 
     # Load winning recipe for final run
     print_success(f"Best trial: {best_trial_id} (bpb={best_bpb:.4f})")
-    console.print("\n[touster.brand]Running final full training with winning recipe…[/touster.brand]")
+    console.print(
+        f"\n[touster.brand]Running final full training with winning recipe[/touster.brand] "
+        f"[touster.dim]lr={best_recipe.learning_rate:.2e} rank={best_recipe.lora_rank} "
+        f"scheduler={best_recipe.scheduler}[/touster.dim]"
+    )
 
-    # Reload backend for final run
+    # Reload backend for final run — always the BEST recipe, never the last trial's
     backend = get_backend(hw)
     backend.load_model(
         model_id=recipe.base_model,
-        lora_rank=current_recipe.lora_rank,
-        lora_alpha=current_recipe.lora_alpha,
-        target_modules=current_recipe.target_modules,
+        lora_rank=best_recipe.lora_rank,
+        lora_alpha=best_recipe.lora_alpha,
+        target_modules=best_recipe.target_modules,
     )
-    final_adapter = run_final(current_recipe, backend, dataset_path, run_dir)
+    final_adapter = run_final(best_recipe, backend, dataset_path, run_dir)
     backend.unload()
 
-    return current_recipe, final_adapter
+    return best_recipe, final_adapter
+
+
+def _structure(r) -> tuple:
+    """The LoRA structural identity that requires a model reload when changed."""
+    return (r.lora_rank, r.lora_alpha, tuple(r.target_modules))
 
 
 def _run_judge_top_k(experiments, recipe, backend, dataset_path, client, loop_cfg, run_dir):
@@ -197,24 +220,33 @@ def _run_judge_top_k(experiments, recipe, backend, dataset_path, client, loop_cf
 
     for exp in top_k:
         trial_adapter = checkpoint_path(run_dir, exp.trial_id)
+        if not trial_adapter.exists():
+            console.print(
+                f"  [touster.warning]Trial {exp.trial_id}: adapter missing, skipping judge[/touster.warning]"
+            )
+            continue
         be = get_backend(hw)
-        be.load_model(
-            recipe.base_model,
-            recipe.lora_rank,
-            recipe.lora_alpha,
-            list(recipe.target_modules),
-        )
-        # Load the per-trial saved adapter if it exists
-        if trial_adapter.exists():
+        try:
+            # PeftModel.from_pretrained reads the adapter's own rank/alpha from
+            # adapter_config.json, so the structural args here are placeholders.
+            be.load_model(
+                recipe.base_model,
+                recipe.lora_rank,
+                recipe.lora_alpha,
+                list(recipe.target_modules),
+            )
             try:
                 from peft import PeftModel
                 from transformers import AutoModelForCausalLM
                 base = AutoModelForCausalLM.from_pretrained(recipe.base_model)
-                peft_m = PeftModel.from_pretrained(base, str(trial_adapter))
-                be._model = peft_m
+                be._model = PeftModel.from_pretrained(base, str(trial_adapter))
             except Exception as e:
-                console.print(f"  [touster.warning]Could not load adapter for trial {exp.trial_id}: {e}[/touster.warning]")
-
-        score = eval_llm_judge(be, client, dataset_path, n_prompts=loop_cfg.judge_prompts)
-        console.print(f"  Trial {exp.trial_id}: bpb={exp.eval_bpb:.4f} judge={score:.1f}/10")
-        be.unload()
+                # Never score the bare base model as if it were the adapter
+                console.print(
+                    f"  [touster.warning]Trial {exp.trial_id}: adapter load failed ({e}), skipping[/touster.warning]"
+                )
+                continue
+            score = eval_llm_judge(be, client, dataset_path, n_prompts=loop_cfg.judge_prompts)
+            console.print(f"  Trial {exp.trial_id}: bpb={exp.eval_bpb:.4f} judge={score:.1f}/10")
+        finally:
+            be.unload()

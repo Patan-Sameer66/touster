@@ -152,7 +152,7 @@ def run_mock_client() -> None:
         c = MockClient(["garbage", "still garbage"])
         return gen._generate_batch(c, "topic", 1, "mock", "")
 
-    expect_raises("two bad replies → RuntimeError", always_bad)
+    expect_raises("two bad replies -> RuntimeError", always_bad)
 
 
 # ── optional live Ollama smoke test ────────────────────────────────────────
@@ -165,6 +165,12 @@ def run_live() -> None:
         client = build_client(ollama_port=int(os.environ.get("OLLAMA_PORT", "11434")), model=model)
         avail = client.list_models()
         print(f"  available models: {avail}")
+        if not model:
+            # auto-pick a chat-capable model — embedding models (e.g. nomic-embed)
+            # return HTTP 400 "does not support chat"
+            chat_models = [m for m in avail if "embed" not in m.lower()]
+            model = chat_models[0] if chat_models else (avail[0] if avail else "")
+            print(f"  auto-picked chat model: {model}")
         ds = gen.generate_dataset(client, "Python list tips", num_samples=4, model=model, batch_size=4)
         print(f"  generated {len(ds)} samples; first:")
         first = ds.to_list()[0]

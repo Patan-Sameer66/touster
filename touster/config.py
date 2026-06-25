@@ -34,6 +34,19 @@ ALLOWED_RECIPE_KNOBS = frozenset(
 Platform = Literal["cuda", "mlx", "cpu"]
 DatasetMode = Literal[0, 1, 2]  # 0=generate, 1=structure, 2=bring-your-own
 
+# Numeric guardrails for agent-proposed recipe knobs.
+_RECIPE_BOUNDS = {
+    "learning_rate": (1e-6, 1e-1),
+    "lora_rank": (1, 512),
+    "lora_alpha": (1, 1024),
+    "warmup_steps": (0, 100_000),
+    "num_epochs": (1, 100),
+    "max_steps": (1, 1_000_000),
+    "batch_size": (1, 1024),
+    "gradient_accumulation_steps": (1, 1024),
+}
+_VALID_SCHEDULERS = frozenset({"cosine", "linear", "constant"})
+
 
 @dataclass(frozen=True)
 class HardwareConfig:
@@ -81,6 +94,18 @@ class RecipeConfig:
         patched = dict(diff)
         if "target_modules" in patched:
             patched["target_modules"] = tuple(patched["target_modules"])
+            if not patched["target_modules"]:
+                raise ValueError("target_modules must not be empty")
+        # Numeric bounds — prevents lr→0 underflow spiral and absurd configs
+        for key, (lo, hi) in _RECIPE_BOUNDS.items():
+            if key in patched:
+                val = patched[key]
+                if not isinstance(val, (int, float)) or not (lo <= val <= hi):
+                    raise ValueError(f"{key}={val!r} out of bounds [{lo}, {hi}]")
+        if "scheduler" in patched and patched["scheduler"] not in _VALID_SCHEDULERS:
+            raise ValueError(
+                f"scheduler={patched['scheduler']!r} not in {sorted(_VALID_SCHEDULERS)}"
+            )
         return replace(self, **patched)
 
 

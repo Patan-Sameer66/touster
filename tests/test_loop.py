@@ -232,9 +232,9 @@ def main() -> int:
         print(line)
     print("=" * 60)
     print(f"TOTAL: {_PASS} passed, {_FAIL} failed")
-    print("\nNOTE: some FAILs are EXPECTED — they prove known bugs the review")
-    print("found (best-recipe tracking, apply_diff bounds). Paste this output back.")
-    return 0
+    print("\nExpected: all pass on the mock path. Run with --real on Colab/GPU")
+    print("(where peft+torch are installed) to smoke-test the real training path.")
+    return 1 if _FAIL else 0
 
 
 if __name__ == "__main__":

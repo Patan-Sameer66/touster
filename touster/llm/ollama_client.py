@@ -22,8 +22,16 @@ class OllamaClient:
         chosen_model = model or self.model
         if not chosen_model:
             available = self.list_models()
-            if available:
-                chosen_model = available[0]
+            # Embedding models (e.g. nomic-embed-text) return HTTP 400
+            # "does not support chat" — never auto-pick one.
+            chat_models = [m for m in available if "embed" not in m.lower()]
+            if chat_models:
+                chosen_model = chat_models[0]
+            elif available:
+                raise RuntimeError(
+                    f"Ollama: only embedding models found {available}. "
+                    "Pull a chat model (e.g. `ollama pull qwen2.5:3b`) and set OLLAMA_MODEL."
+                )
             else:
                 raise RuntimeError(
                     "Ollama: no model specified and none found. "
