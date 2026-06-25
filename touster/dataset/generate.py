@@ -91,6 +91,34 @@ def _repair_json(text: str) -> str:
     return text
 
 
+def _wrap_flat_messages(items: list[dict]) -> list[dict]:
+    """Recover when the LLM returns [{role, content}, ...] instead of [{messages:[...]}, ...].
+
+    Groups consecutive user+assistant pairs into {messages: [user, assistant]} objects.
+    Returns items unchanged if they already have the messages key.
+    """
+    if not items or "messages" in items[0]:
+        return items
+    # All items look like flat message dicts
+    if not all(isinstance(i, dict) and "role" in i and "content" in i for i in items):
+        return items
+    wrapped: list[dict] = []
+    i = 0
+    while i < len(items):
+        pair: list[dict] = []
+        if items[i].get("role") == "user":
+            pair.append(items[i])
+            i += 1
+        if i < len(items) and items[i].get("role") == "assistant":
+            pair.append(items[i])
+            i += 1
+        if pair:
+            wrapped.append({"messages": pair})
+        else:
+            i += 1  # skip unrecognised item
+    return wrapped
+
+
 def _parse_llm_json(text: str) -> list[dict]:
     """Extract and parse a JSON array from LLM text."""
     text = text.strip()
@@ -116,6 +144,8 @@ def _parse_llm_json(text: str) -> list[dict]:
         if not all(isinstance(item, dict) for item in obj):
             bad = [type(i).__name__ for i in obj if not isinstance(i, dict)]
             raise ValueError(f"JSON array contains non-object items: {bad[:3]}")
+        # Auto-wrap flat [{role,content},...] the model emits when format="json"
+        obj = _wrap_flat_messages(obj)
         return obj
     except json.JSONDecodeError:
         # Fallback: salvage individually-parseable sample objects
