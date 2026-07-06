@@ -5,8 +5,8 @@ import re
 
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
-from touster.console import console
-from touster.dataset.schema import Dataset, from_list
+from touster.console import console, print_warning
+from touster.dataset.schema import Dataset, Sample, try_parse_sample
 
 
 _SYSTEM_PROMPT = (
@@ -194,17 +194,6 @@ def _generate_batch(
                 f"LLM returned invalid JSON after retry. Last response: {reply2[:300]!r}"
             ) from exc
 
-    # Validate top-level shape before returning — inner message dicts or
-    # wrong-shaped objects must not silently propagate into all_samples.
-    if not all(isinstance(item, dict) and "messages" in item for item in batch):
-        bad_shapes = [
-            list(item.keys()) if isinstance(item, dict) else type(item).__name__
-            for item in batch[:3]
-        ]
-        raise RuntimeError(
-            f"LLM returned objects missing required 'messages' key. "
-            f"Got shapes: {bad_shapes}"
-        )
     return batch
 
 
@@ -224,7 +213,12 @@ def generate_dataset(
     if num_samples < 1:
         raise ValueError(f"num_samples must be at least 1, got {num_samples}")
 
-    all_samples: list[dict] = []
+    # A batch producing zero golden-format samples this many times in a row
+    # means the LLM can't be salvaged for this run — stop instead of spinning.
+    _MAX_CONSECUTIVE_EMPTY = 5
+
+    good_samples: list[Sample] = []
+    consecutive_empty = 0
 
     with Progress(
         SpinnerColumn(),
@@ -236,23 +230,35 @@ def generate_dataset(
     ) as progress:
         task = progress.add_task("Generating...", total=num_samples)
 
-        while len(all_samples) < num_samples:
-            remaining = num_samples - len(all_samples)
+        while len(good_samples) < num_samples:
+            remaining = num_samples - len(good_samples)
             current_batch = min(batch_size, remaining)
-            batch = _generate_batch(client, prompt, current_batch, model, system_prompt)
-            if not batch:
-                raise RuntimeError(
-                    f"LLM returned an empty batch for topic {prompt!r}. "
-                    "Check your LLM configuration and prompt."
-                )
-            all_samples.extend(batch[:current_batch])
-            progress.update(task, advance=len(batch[:current_batch]))
+            try:
+                raw_batch = _generate_batch(client, prompt, current_batch, model, system_prompt)
+            except RuntimeError as exc:
+                print_warning(f"Batch generation failed, skipping: {exc}")
+                raw_batch = []
 
-    try:
-        return from_list(all_samples[:num_samples])
-    except ValueError as exc:
-        raise RuntimeError(
-            f"LLM-generated samples failed schema validation for topic {prompt!r}. "
-            f"This usually means the LLM returned malformed objects "
-            f"(missing 'messages' key, wrong nesting, etc.). Detail: {exc}"
-        ) from exc
+            # Drop malformed items instead of letting one bad sample take
+            # down the whole run — this is the strict golden-format gate.
+            parsed = [try_parse_sample(item) for item in raw_batch]
+            valid = [s for s in parsed if s is not None]
+            dropped = len(raw_batch) - len(valid)
+            if dropped:
+                print_warning(f"Dropped {dropped} malformed sample(s) from batch (kept {len(valid)}).")
+
+            if not valid:
+                consecutive_empty += 1
+                if consecutive_empty >= _MAX_CONSECUTIVE_EMPTY:
+                    raise RuntimeError(
+                        f"LLM produced no valid golden-format samples after "
+                        f"{_MAX_CONSECUTIVE_EMPTY} consecutive failed batches for "
+                        f"topic {prompt!r}. Check your LLM configuration and prompt."
+                    )
+                continue
+
+            consecutive_empty = 0
+            good_samples.extend(valid[:remaining])
+            progress.update(task, advance=len(valid[:remaining]))
+
+    return Dataset(samples=tuple(good_samples[:num_samples]))

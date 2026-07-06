@@ -75,6 +75,18 @@ def _parse_sample(raw: object) -> Sample:
     return Sample(messages=messages)
 
 
+def try_parse_sample(raw: object) -> Sample | None:
+    """Parse one sample dict against the golden {messages: [...]} schema.
+
+    Never raises — returns None for anything malformed, so one bad LLM
+    sample can be dropped without losing the rest of a batch.
+    """
+    try:
+        return _parse_sample(raw)
+    except ValueError:
+        return None
+
+
 def from_list(data: list[dict]) -> Dataset:
     """
     Parse list of {messages: [{role, content}]} dicts into Dataset.

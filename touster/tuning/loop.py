@@ -124,14 +124,28 @@ def run_loop(
             # Reload only when the LoRA structure actually differs from what is
             # loaded — correct regardless of which recipe we branched from.
             if _structure(current_recipe) != loaded_structure:
-                backend.unload()
-                backend.load_model(
-                    model_id=recipe.base_model,
-                    lora_rank=current_recipe.lora_rank,
-                    lora_alpha=current_recipe.lora_alpha,
-                    target_modules=current_recipe.target_modules,
-                )
-                loaded_structure = _structure(current_recipe)
+                reload_ok = _reload_backend(backend, recipe.base_model, current_recipe)
+                if reload_ok:
+                    loaded_structure = _structure(current_recipe)
+                else:
+                    # Structural reload is unrecoverable for this trial (e.g. an
+                    # OOM at a bigger rank) — restore the last-known-good
+                    # structure so subsequent trials aren't dragged down too,
+                    # and count this trial as failed rather than crashing.
+                    print_warning(
+                        f"Trial {trial_id}: could not load structure {_structure(current_recipe)}, "
+                        "reverting to last-known-good and marking trial failed."
+                    )
+                    if not _reload_backend(backend, recipe.base_model, best_recipe):
+                        print_warning(
+                            "Backend is unrecoverable — stopping the loop early "
+                            "and falling back to the default recipe."
+                        )
+                        break
+                    loaded_structure = _structure(best_recipe)
+                    last_bpb = float("inf")
+                    progress.advance(task)
+                    continue
 
             bpb, adapter_path = run_trial(
                 trial_id=trial_id,
@@ -163,13 +177,21 @@ def run_loop(
             )
             progress.advance(task)
 
-    backend.unload()
+    try:
+        backend.unload()
+    except Exception:
+        pass
 
     if best_trial_id == -1:
-        raise RuntimeError(
-            "All trials failed — no valid adapter produced. "
-            "Check dataset quality and model configuration."
+        # Every trial failed (training crash, eval crash, or unrecoverable
+        # reload) and there's no known-solvable fix left to try here — fall
+        # back to the caller-supplied default recipe rather than crashing
+        # the notebook. The final run below still trains a real adapter.
+        print_warning(
+            "All trials failed to produce a valid adapter — falling back to "
+            "the default recipe for the final training run."
         )
+        best_recipe = recipe
 
     # LLM-judge top-k finalists
     experiments = load_experiments(run_dir)
@@ -177,7 +199,10 @@ def run_loop(
         _run_judge_top_k(experiments, recipe, backend, dataset_path, client, loop_cfg, run_dir)
 
     # Load winning recipe for final run
-    print_success(f"Best trial: {best_trial_id} (bpb={best_bpb:.4f})")
+    if best_trial_id == -1:
+        print_success("Using fallback default recipe (no trial improved on it).")
+    else:
+        print_success(f"Best trial: {best_trial_id} (bpb={best_bpb:.4f})")
     console.print(
         f"\n[touster.brand]Running final full training with winning recipe[/touster.brand] "
         f"[touster.dim]lr={best_recipe.learning_rate:.2e} rank={best_recipe.lora_rank} "
@@ -201,6 +226,22 @@ def run_loop(
 def _structure(r) -> tuple:
     """The LoRA structural identity that requires a model reload when changed."""
     return (r.lora_rank, r.lora_alpha, tuple(r.target_modules))
+
+
+def _reload_backend(backend, base_model: str, recipe: RecipeConfig) -> bool:
+    """Unload and reload backend with recipe's LoRA structure. Returns False on failure."""
+    try:
+        backend.unload()
+        backend.load_model(
+            model_id=base_model,
+            lora_rank=recipe.lora_rank,
+            lora_alpha=recipe.lora_alpha,
+            target_modules=recipe.target_modules,
+        )
+        return True
+    except Exception as e:
+        print_warning(f"Backend reload failed: {e}")
+        return False
 
 
 def _run_judge_top_k(experiments, recipe, backend, dataset_path, client, loop_cfg, run_dir):
