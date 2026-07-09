@@ -2,9 +2,21 @@
 
 Clean-slate rewrite. Five stages, one notebook, package does the heavy lifting.
 
+## Stack decision: display
+Old build used `rich` for all terminal output (tables, panels, progress
+bars). Swapped to **`IPython.display` (HTML)** — the notebook/Colab cell is
+the real surface, not a terminal, so render actual HTML (`display(HTML(...))`)
+for the hardware table, config summary, trial log, and dashboard instead of
+rich's console-width-guessing terminal styling. Applies to every stage below
+that prints a table or status — not called out per-stage.
+
 ## 1. Hardware check
 Detect GPU/CPU/RAM, print a ranked table of models that fit, with rough
 speed estimates. Read-only — nothing to configure here.
+
+**Install** isn't its own stage — light deps (psutil, pynvml) install here;
+heavy deps (torch/peft/transformers, GPU/CPU/MLX variant) install right
+after config, once hardware + chosen model are both known.
 
 ## 2. Config
 Single editable block. Everything downstream reads from here:
@@ -13,6 +25,12 @@ Single editable block. Everything downstream reads from here:
 - LLM client (optional — API or Ollama)
 - **save/export toggles** (local save, merged weights, GGUF, HF Hub push) —
   configured here, *executed* at the end of stage 4, not a separate stage
+
+**Cost/time estimate** prints here, before any compute or API spend starts:
+`≈45 min, ≈$0 (local Ollama)` or `≈$1.20 (API dataset gen + judge calls)`.
+Computed from stage 1's t/s estimate × `max_trials × trial_steps` for time,
+and `num_samples × tokens/sample × API price` (or $0 if Ollama) for cost.
+One print line, not a stage of its own.
 
 ## 3. Data source (3 modes)
 - **Mode 0 — generate**: topic string → LLM writes Q&A pairs
@@ -38,7 +56,9 @@ Search + train + export, one stage:
    decision-maker.
 3. LLM-as-judge on the top-k survivors only (cheap eval loss first, expensive
    judge second).
-4. Checkpoint every trial — resumable if the run dies partway.
+4. **Resumable** — checkpoint every trial, so a Colab disconnect or spot-
+   instance death doesn't lose the run. Cross-cutting property of this
+   stage, not a stage of its own.
 5. **If every trial fails or nothing beats the default** (backend crash,
    OOM, bad reload): fall back to the default recipe and still run final
    training. Never raise and kill the notebook.
@@ -51,18 +71,3 @@ One consolidated view, not five separate cells:
 - trial log (every trial's eval score + recipe diff, kept/discarded)
 - base-vs-fine-tuned side-by-side generation on fixed + your own prompts
 - run summary (best score, winning recipe, every artifact + its size)
-
----
-
-## Open question for review
-Is 5 stages the right cut, or is something missing? Candidates I'd flag
-(delete this section once resolved):
-- **Install** isn't a numbered stage above — folds into stage 1 (light deps)
-  and stage 2→3 transition (heavy deps, once hardware is known). Worth a
-  one-line callout in the notebook even if it's not a "stage."
-- **Resumability** (checkpoint/resume across Colab disconnects) is a
-  cross-cutting property of stage 4 — called out above so it doesn't get
-  lost in the rewrite, not a stage of its own.
-- Nothing else looks missing for a fixed pipeline. If you want a 6th stage
-  it'd be an explicit **cost/time estimate** upfront ("≈45 min, ≈$0 local")
-  before committing to a run — currently absent everywhere.

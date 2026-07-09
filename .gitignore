@@ -12,6 +12,7 @@ build/
 wheels/
 *.whl
 MANIFEST
+research.md
 
 # ═══════════════════════════ VIRTUAL ENV ══════════════════════════════
 .venv/
