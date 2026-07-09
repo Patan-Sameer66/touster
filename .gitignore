@@ -55,6 +55,8 @@ checkpoints/
 
 # ═══════════════════════════ TESTING / COVERAGE ═══════════════════════
 .pytest_cache/
+tests/
+overview.md
 .coverage
 coverage.xml
 htmlcov/

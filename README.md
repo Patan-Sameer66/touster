@@ -82,4 +82,5 @@ The mode-0 JSON parser survives trailing commas, markdown fences, unescaped back
 
 ## License
 
-See repository.
+MIT.
+
